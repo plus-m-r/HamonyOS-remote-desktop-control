@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "label"
+    },
+    {
+      "name": "internet_permission_reason",
+      "value": "用于远程桌面控制功能需要网络连接"
+    },
+    {
+      "name": "datasync_permission_reason",
+      "value": "用于设备间数据同步和远程控制"
     }
   ]
 }
