@@ -13,8 +13,11 @@ export class CmdUtils {
   /**
    * 创建请求客户端信息命令
    */
-  static createReqCliInfoCmd(): ConcreteCmd {
-    return new ConcreteCmd(CmdType.ReqCliInfo);
+  static createReqCliInfoCmd(screenNum: number = 1, osName: string = 'HarmonyOS'): ConcreteCmd {
+    const data = new CmdData();
+    data.screenNum = screenNum;
+    data.osName = osName;
+    return new ConcreteCmd(CmdType.ReqCliInfo, data);
   }
 
   /**
@@ -268,6 +271,8 @@ export class CmdUtils {
         if (parsed.isFile) data.isFile = parsed.isFile as number;
         if (parsed.oldPassword) data.oldPassword = parsed.oldPassword as string;
         if (parsed.newPassword) data.newPassword = parsed.newPassword as string;
+        if (parsed.screenNum) data.screenNum = parsed.screenNum as number;
+        if (parsed.osName) data.osName = parsed.osName as string;
         
         return new ConcreteCmd(data.type, data, data.id);
       }

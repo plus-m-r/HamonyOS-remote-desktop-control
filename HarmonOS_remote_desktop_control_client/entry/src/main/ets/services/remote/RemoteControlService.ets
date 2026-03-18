@@ -61,7 +61,7 @@ export class RemoteControlService implements IRemoteControlService {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 3;
   private reconnectDelay: number = 2000;
-  private heartbeatInterval: number = 30000;
+  private heartbeatInterval: number = 3000; // 3秒，与Java客户端保持一致
   private heartbeatTimer: number = -1;
   private receiveBuffer: ArrayBuffer = new ArrayBuffer(0);
   private deviceCode: string = '';
@@ -154,6 +154,9 @@ export class RemoteControlService implements IRemoteControlService {
       
       this.connectionState = ConnectionState.CONNECTED;
       this.reconnectAttempts = 0;
+      
+      // 发送客户端信息请求（模拟Java客户端行为）
+      await this.sendReqCliInfoCmd();
       
       // 启动心跳
       this.startHeartbeat();
@@ -518,6 +521,21 @@ export class RemoteControlService implements IRemoteControlService {
     
     const fileCmd = CmdCodec.createClipboardTransferCmd(this.deviceCode, fileInfoId, fileName);
     await this.sendCmd(fileCmd);
+  }
+
+  // 发送客户端信息请求
+  private async sendReqCliInfoCmd(): Promise<void> {
+    if (!this.socket) return;
+    
+    try {
+      // 模拟Java客户端行为：发送屏幕数量和操作系统信息
+      // 在HarmonyOS中，我们发送默认值
+      const reqCliInfoCmd = CmdCodec.createReqCliInfoCmd(1, 'HarmonyOS');
+      await this.sendCmd(reqCliInfoCmd);
+      console.info('RemoteControlService: Sent ReqCliInfo command');
+    } catch (error) {
+      console.error('RemoteControlService: Failed to send ReqCliInfo command', error);
+    }
   }
 
   // 发送心跳

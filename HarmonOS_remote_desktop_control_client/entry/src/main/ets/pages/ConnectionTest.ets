@@ -2,13 +2,14 @@
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
 import prompt from '@ohos.promptAction';
-import Logger from '@ohos.hilog';
+import hilog from '@ohos.hilog';
 import { SERVER_CONFIG } from '../config/config';
 import http from '@ohos.net.http';
 import router from '@ohos.router';
 import { BusinessError } from '@ohos.base';
 
 const TAG = 'ConnectionTestPage';
+const DOMAIN = 0x0000;
 
 @Entry
 @Component
@@ -65,37 +66,106 @@ struct ConnectionTest {
 
   private async testTcpConnection() {
     this.isTesting = true;
-    this.testResult = '正在测试TCP连接...';
+    this.testResult = '正在测试TCP连接并获取设备信息...';
     
     try {
       // 初始化服务
       await ServiceProvider.initialize();
       
-      const onSuccess = () => {
-        this.testResult = 'TCP连接成功!';
-        this.connectionStatus = '已连接';
-        console.info(`${TAG}: TCP connection successful`);
-        this.isTesting = false;
-        
-        // 断开连接
-        setTimeout((): void => {
-          ServiceProvider.remoteControlService.disconnect();
-          this.connectionStatus = '已断开';
-        }, 3000);
-      };
+      const remoteControlService = ServiceProvider.remoteControlService;
+      let deviceCodeReceived = '';
+      let passwordReceived = '';
+      let connectionEstablished = false;
       
-      const onError = (error: string) => {
-        this.testResult = `TCP连接失败: ${error}`;
-        console.error(`${TAG}: TCP connection failed`, error);
-        this.isTesting = false;
-      };
+      // 设置设备信息回调
+      remoteControlService.setDeviceInfoCallback((deviceCode: string, password: string) => {
+        deviceCodeReceived = deviceCode;
+        passwordReceived = password;
+        hilog.info(DOMAIN, TAG, '成功接收到设备信息 - ID: %{public}s, 密码: %{public}s', deviceCode, password);
+        this.testResult = `✅ TCP连接成功！收到服务器分配的设备信息:
+📱 设备ID: ${deviceCode}
+🔑 密码: ${password}
+
+✅ 设备信息已保存到应用状态`;
+        
+        // 保存到全局状态
+        AppStateManager.setUserId(deviceCode);
+        AppStateManager.setUserPassword(password);
+        
+        prompt.showToast({
+          message: '✅ 设备信息已获取并保存',
+          duration: 3000
+        });
+        
+        // 3秒后自动返回主页
+        setTimeout(() => {
+          router.back();
+        }, 3000);
+      });
+      
+      // 设置连接状态回调
+      remoteControlService.setConnectionCallback((connected: boolean) => {
+        this.connectionStatus = connected ? '已连接' : '已断开';
+        if (connected) {
+          connectionEstablished = true;
+          hilog.info(DOMAIN, TAG, 'TCP连接已建立');
+          this.testResult = '✅ TCP连接已建立，等待接收设备信息...';
+        } else {
+          hilog.info(DOMAIN, TAG, 'TCP连接已断开');
+        }
+      });
       
       // 尝试连接
-      await ServiceProvider.remoteControlService.connect(onSuccess, onError);
+      await remoteControlService.connect(
+        () => {
+          hilog.info(DOMAIN, TAG, 'TCP连接回调成功');
+          this.testResult = '✅ TCP连接成功，等待接收设备信息...';
+        },
+        (error: string) => {
+          this.testResult = `❌ TCP连接失败: ${error}`;
+          console.error(`${TAG}: TCP connection failed`, error);
+          prompt.showToast({
+            message: `连接失败: ${error}`,
+            duration: 3000
+          });
+          this.isTesting = false;
+        }
+      );
+      
+      // 等待10秒接收设备信息
+      setTimeout(() => {
+        if (!deviceCodeReceived) {
+          if (connectionEstablished) {
+            this.testResult = '⚠️ TCP连接成功，但未收到设备信息（10秒超时）\n\n可能的原因：\n1. 服务器未发送ResCliInfo命令\n2. 服务器配置不正确\n3. 网络延迟较高\n\n建议：\n1. 检查服务器是否正常运行\n2. 确认服务器IP和端口配置正确\n3. 查看服务器日志确认是否发送了设备信息';
+            hilog.warn(DOMAIN, TAG, '连接成功但未收到设备信息，可能服务器未发送ResCliInfo命令');
+          } else {
+            this.testResult = '❌ TCP连接失败或超时\n\n可能的原因：\n1. 服务器未启动\n2. 防火墙阻止连接\n3. IP地址或端口错误\n4. 服务器配置不正确\n\n建议：\n1. 确认服务器已启动\n2. 检查防火墙设置\n3. 验证IP地址和端口配置';
+          }
+          
+          prompt.showToast({
+            message: '未收到设备信息，请检查服务器',
+            duration: 3000
+          });
+        }
+        
+        // 断开连接
+        try {
+          remoteControlService.disconnect();
+          hilog.info(DOMAIN, TAG, 'TCP测试完成，已断开连接');
+        } catch (error) {
+          console.error(`${TAG}: TCP disconnect failed`, error);
+        }
+        
+        this.isTesting = false;
+      }, 10000);
       
     } catch (error) {
-      this.testResult = `TCP连接异常: ${error}`;
+      this.testResult = `❌ TCP连接异常: ${error}`;
       console.error(`${TAG}: TCP connection exception`, error);
+      prompt.showToast({
+        message: `连接异常: ${error}`,
+        duration: 3000
+      });
       this.isTesting = false;
     }
   }

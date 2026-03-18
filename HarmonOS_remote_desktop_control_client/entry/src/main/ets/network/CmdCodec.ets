@@ -12,16 +12,69 @@ import { util } from '@kit.ArkTS';
  */
 export class CmdCodec {
   /**
+   * 获取命令类型的ordinal值（与Java服务端保持一致）
+   */
+  private static getCmdTypeOrdinal(cmdType: CmdType): number {
+    switch (cmdType) {
+      case CmdType.ReqPing: return 0;
+      case CmdType.ReqOpen: return 1;
+      case CmdType.ReqCapture: return 2;
+      case CmdType.ReqRemoteClipboard: return 3;
+      case CmdType.ResOpen: return 4;
+      case CmdType.ResCliInfo: return 5;
+      case CmdType.ResCapture: return 6;
+      case CmdType.ResPong: return 7;
+      case CmdType.ResRemoteClipboard: return 8;
+      case CmdType.Capture: return 9;
+      case CmdType.CompressorConfig: return 10;
+      case CmdType.CaptureConfig: return 11;
+      case CmdType.KeyControl: return 12;
+      case CmdType.MouseControl: return 13;
+      case CmdType.ClipboardText: return 14;
+      case CmdType.ClipboardTransfer: return 15;
+      case CmdType.ReqCliInfo: return 16;
+      case CmdType.SelectScreen: return 17;
+      case CmdType.ChangePwd: return 18;
+      default: return -1;
+    }
+  }
+
+  /**
    * 编码命令为 ArrayBuffer
    */
   static encode(cmd: ConcreteCmd): ArrayBuffer {
+    try {
+      // 使用二进制协议，与Java服务端保持一致
+      const cmdType = cmd.type;
+      const cmdData = cmd.toJSON() as Record<string, Object>;
+      
+      // 根据命令类型进行编码
+      switch (cmdType) {
+        case CmdType.ReqPing:
+          return CmdCodec.encodePingCmd();
+        case CmdType.ReqCliInfo:
+          return CmdCodec.encodeReqCliInfoCmd(cmdData);
+        default:
+          console.error(`CmdCodec: Unsupported command type for binary encoding: ${cmdType}`);
+          return CmdCodec.encodeJsonFallback(cmd);
+      }
+    } catch (error) {
+      console.error('CmdCodec: Failed to encode command', error);
+      return new ArrayBuffer(0);
+    }
+  }
+
+  /**
+   * JSON回退编码（用于其他命令类型）
+   */
+  private static encodeJsonFallback(cmd: ConcreteCmd): ArrayBuffer {
     try {
       // 序列化命令为 JSON 字符串
       const jsonStr = CmdUtils.serialize(cmd);
       
       // 使用 TextEncoder 将字符串转换为 UTF-8 字节数组
       const encoder = new util.TextEncoder();
-      const jsonBytes = encoder.encodeInto(jsonStr);
+      const jsonBytes = encoder.encode(jsonStr);
       
       // 获取编码后的字节数
       const byteLength = jsonBytes.byteLength;
@@ -39,9 +92,77 @@ export class CmdCodec {
       
       return buffer;
     } catch (error) {
-      console.error('CmdCodec: Failed to encode command', error);
+      console.error('CmdCodec: Failed to encode JSON fallback', error);
       return new ArrayBuffer(0);
     }
+  }
+
+  /**
+   * 编码心跳请求命令
+   */
+  private static encodePingCmd(): ArrayBuffer {
+    // 心跳命令格式：魔数(1) + 命令类型(1) + 数据长度(4) = 6字节
+    const buffer = new ArrayBuffer(6);
+    const view = new DataView(buffer);
+    
+    // 魔数：100（与Java服务端一致）
+    view.setUint8(0, 100);
+    
+    // 命令类型：ReqPing的ordinal值
+    const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqPing);
+    view.setUint8(1, cmdTypeOrdinal);
+    
+    // 数据长度：心跳命令没有额外数据
+    view.setUint32(2, 0, false);
+    
+    return buffer;
+  }
+
+  /**
+   * 编码请求客户端信息命令
+   */
+  private static encodeReqCliInfoCmd(cmdData: Record<string, Object>): ArrayBuffer {
+    const screenNum = cmdData.screenNum as number || 1;
+    const osName = cmdData.osName as string || 'HarmonyOS';
+    
+    // 将osName转换为UTF-8字节数组
+    const encoder = new util.TextEncoder();
+    const osNameBytes = encoder.encode(osName);
+    
+    // 计算数据长度：screenNum(4) + osName长度(4) + osName字节数
+    const dataLength = 4 + 4 + osNameBytes.byteLength;
+    
+    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
+    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const view = new DataView(buffer);
+    let offset = 0;
+    
+    // 魔数：100
+    view.setUint8(offset, 100);
+    offset += 1;
+    
+    // 命令类型：ReqCliInfo的ordinal值
+    const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqCliInfo);
+    view.setUint8(offset, cmdTypeOrdinal);
+    offset += 1;
+    
+    // 数据长度
+    view.setUint32(offset, dataLength, false);
+    offset += 4;
+    
+    // screenNum
+    view.setInt32(offset, screenNum, false);
+    offset += 4;
+    
+    // osName长度
+    view.setUint32(offset, osNameBytes.byteLength, false);
+    offset += 4;
+    
+    // osName字节
+    const dataView = new Uint8Array(buffer, offset);
+    dataView.set(osNameBytes);
+    
+    return buffer;
   }
 
   /**
@@ -127,6 +248,13 @@ export class CmdCodec {
    */
   static createPongCmd(): ConcreteCmd {
     return CmdUtils.createPongCmd();
+  }
+
+  /**
+   * 创建请求客户端信息命令
+   */
+  static createReqCliInfoCmd(screenNum: number = 1, osName: string = 'HarmonyOS'): ConcreteCmd {
+    return CmdUtils.createReqCliInfoCmd(screenNum, osName);
   }
 
   /**

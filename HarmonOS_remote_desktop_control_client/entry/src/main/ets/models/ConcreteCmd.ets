@@ -33,7 +33,7 @@ export class ConcreteCmd implements Cmd {
   /**
    * 转换为 JSON 对象
    */
-  toJSON(): object {
+  toJSON(): Record<string, Object> {
     const result: Record<string, Object> = {};
     result['type'] = this.type;
     result['id'] = this.id;

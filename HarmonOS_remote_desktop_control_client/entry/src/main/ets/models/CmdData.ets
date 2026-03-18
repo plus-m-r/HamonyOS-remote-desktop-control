@@ -33,6 +33,8 @@ export class CmdData {
   isFile: number = 0;
   oldPassword: string = '';
   newPassword: string = '';
+  screenNum: number = 1; // 屏幕数量，默认为1
+  osName: string = 'HarmonyOS'; // 操作系统名称
   type: CmdType = CmdType.ReqPing;
   id: string = '';
 }

@@ -25,6 +25,42 @@ struct Index {
       hilog.info(DOMAIN, TAG, '开始初始化服务...');
       await ServiceProvider.initialize();
       
+      // 获取远程控制服务
+      const remoteControlService = ServiceProvider.remoteControlService;
+      
+      // 设置设备信息回调，用于接收服务器分配的设备ID和密码
+      remoteControlService.setDeviceInfoCallback((deviceCode: string, password: string) => {
+        hilog.info(DOMAIN, TAG, '收到服务器分配的设备信息 - ID: %{public}s, 密码: %{public}s', deviceCode, password);
+        
+        // 保存到全局状态
+        AppStateManager.setUserId(deviceCode);
+        AppStateManager.setUserPassword(password);
+        
+        // 更新UI状态
+        this.userId = deviceCode;
+        this.userPassword = password;
+        this.waitingForServerInfo = false;
+        
+        prompt.showToast({
+          message: '设备信息已获取',
+          duration: 2000
+        });
+      });
+      
+      // 连接到服务器以获取设备信息
+      await remoteControlService.connect(
+        () => {
+          hilog.info(DOMAIN, TAG, '连接到服务器成功，等待设备信息...');
+        },
+        (error: string) => {
+          hilog.error(DOMAIN, TAG, '连接到服务器失败: %{public}s', error);
+          prompt.showToast({
+            message: '连接服务器失败，请检查网络',
+            duration: 3000
+          });
+        }
+      );
+      
       // 获取用户信息（初始为空，等待服务器分配）
       this.userId = AppStateManager.getUserId();
       this.userPassword = AppStateManager.getUserPassword();
@@ -37,7 +73,7 @@ struct Index {
       if (!this.userId) {
         this.waitingForServerInfo = true;
         prompt.showToast({
-          message: '正在等待服务器分配用户信息...',
+          message: '正在等待服务器分配设备信息...',
           duration: 3000
         });
       } else {
@@ -49,6 +85,17 @@ struct Index {
         message: '服务初始化失败，请检查网络连接',
         duration: 3000
       });
+    }
+  }
+
+  // 页面销毁时断开连接
+  aboutToDisappear(): void {
+    // 断开与服务器的连接
+    try {
+      ServiceProvider.remoteControlService.disconnect();
+      hilog.info(DOMAIN, TAG, 'Index页面销毁，断开服务器连接');
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '断开连接失败: %{public}s', JSON.stringify(error));
     }
   }
 
@@ -70,16 +117,18 @@ struct Index {
         duration: 2000
       });
 
-      // 这里应该调用实际的连接逻辑
-      // await RemoteControlService.connect(this.deviceIdInput, this.devicePasswordInput);
-      
-      prompt.showToast({
-        message: '连接成功',
-        duration: 2000
-      });
+      // 设置设备信息
+      const remoteControlService = ServiceProvider.remoteControlService;
+      remoteControlService.setDeviceInfo(this.deviceIdInput, this.devicePasswordInput);
       
       // 跳转到控制页面
-      // router.pushUrl({ url: 'pages/Control' });
+      router.pushUrl({ 
+        url: 'pages/Control',
+        params: {
+          deviceId: this.deviceIdInput,
+          password: this.devicePasswordInput
+        }
+      });
       
     } catch (error) {
       hilog.error(DOMAIN, TAG, '连接失败: %{public}s', JSON.stringify(error));
