@@ -1,5 +1,9 @@
 
-// entry/src/main/ets/di/Injector.ts
+// entry/src/main/ets/di/Injector.ets
+
+import { RemoteControlService } from '../services/remote/RemoteControlService';
+import { ClipboardService } from '../services/clipboard/ClipboardService';
+import { FileService } from '../services/file/FileService';
 
 /**
  * 基础服务接口
@@ -122,17 +126,17 @@ export class Injector {
   private async initializeFactories(): Promise<void> {
     try {
       // 动态导入服务工厂
-      const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
-      const clipboardModule = await import('./factories/ClipboardServiceFactory');
-      const fileModule = await import('./factories/FileServiceFactory');
+      const remoteControlModule = await import('./factories/RemoteControlServiceFactory.ets');
+      const clipboardModule = await import('./factories/ClipboardServiceFactory.ets');
+      const fileModule = await import('./factories/FileServiceFactory.ets');
 
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
       // 注册服务工厂
-      this.registerFactory<object>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => RemoteControlServiceFactory.create());
-      this.registerFactory<object>(ServiceKeys.CLIPBOARD_SERVICE, () => ClipboardServiceFactory.create());
-      this.registerFactory<object>(ServiceKeys.FILE_SERVICE, () => FileServiceFactory.create());
+      this.registerFactory<RemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => RemoteControlServiceFactory.create());
+      this.registerFactory<ClipboardService>(ServiceKeys.CLIPBOARD_SERVICE, () => ClipboardServiceFactory.create());
+      this.registerFactory<FileService>(ServiceKeys.FILE_SERVICE, () => FileServiceFactory.create());
 
       console.info('Injector: Service factories registered');
     } catch (error) {

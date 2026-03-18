@@ -1,5 +1,6 @@
 // entry/src/main/ets/state/AppStateManager.ets
 import { DeviceInfo, ScreenImage } from '../models/DeviceInfo';
+import { SyncSettings } from '../pages/Settings';
 
 /**
  * 状态键接口
@@ -10,6 +11,7 @@ export interface StateKeys {
   CURRENT_DEVICE: string;
   DEVICE_LIST: string;
   SELECTED_DEVICE_CODE: string;
+  SYNC_SETTINGS: string;
   USER_ID: string;
   USER_PASSWORD: string;
   DEVICE_ID_INPUT: string;
@@ -41,6 +43,7 @@ export class StateKeysImpl implements StateKeys {
   UPLOAD_PROGRESS: string = 'uploadProgress';
   DOWNLOAD_PROGRESS: string = 'downloadProgress';
   ERROR_MESSAGE: string = 'errorMessage';
+  SYNC_SETTINGS: string = 'syncSettings';
 }
 
 /**
@@ -234,6 +237,15 @@ export class AppStateManager {
 
   static clearError(): void {
     AppStorage.set(STATE_KEYS.ERROR_MESSAGE, '');
+  }
+
+  // ============ 同步设置管理 ============
+  static setSyncSettings(settings: SyncSettings): void {
+    AppStorage.set(STATE_KEYS.SYNC_SETTINGS, settings);
+  }
+  static getSyncSettings(): SyncSettings | null {
+    const settings: SyncSettings | undefined = AppStorage.get<SyncSettings>(STATE_KEYS.SYNC_SETTINGS);
+    return settings ?? null;
   }
 }
 

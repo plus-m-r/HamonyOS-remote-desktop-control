@@ -7,7 +7,7 @@ import router from '@ohos.router';
 const TAG = 'SettingsPage';
 const DOMAIN = 0x0000;
 
-interface SyncSettings {
+export interface SyncSettings {
   // 文件传输
   autoUploadFiles: boolean;      // 自动上传拖拽文件
   showFileProgress: boolean;     // 显示文件传输进度
@@ -34,22 +34,26 @@ struct Settings {
     showTransferNotifications: true,
     showClipboardNotifications: true
   };
-  
-  aboutToAppear() {
+  aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, 'Settings页面开始加载');
     // 从AppStateManager加载设置
     this.loadSettings();
   }
-  
-  loadSettings() {
+  loadSettings(): void {
     // 从AppStateManager加载设置
-    const savedSettings = AppStateManager.getSyncSettings();
+    const savedSettings: SyncSettings | null = AppStateManager.getSyncSettings();
     if (savedSettings) {
-      this.syncSettings = { ...this.syncSettings, ...savedSettings };
+      // 手动合并设置
+      this.syncSettings.autoUploadFiles = savedSettings.autoUploadFiles ?? this.syncSettings.autoUploadFiles;
+      this.syncSettings.showFileProgress = savedSettings.showFileProgress ?? this.syncSettings.showFileProgress;
+      this.syncSettings.autoSyncClipboard = savedSettings.autoSyncClipboard ?? this.syncSettings.autoSyncClipboard;
+      this.syncSettings.syncInterval = savedSettings.syncInterval ?? this.syncSettings.syncInterval;
+      this.syncSettings.syncTextOnly = savedSettings.syncTextOnly ?? this.syncSettings.syncTextOnly;
+      this.syncSettings.showTransferNotifications = savedSettings.showTransferNotifications ?? this.syncSettings.showTransferNotifications;
+      this.syncSettings.showClipboardNotifications = savedSettings.showClipboardNotifications ?? this.syncSettings.showClipboardNotifications;
     }
   }
-  
-  saveSettings() {
+  saveSettings(): void {
     // 保存设置到AppStateManager
     AppStateManager.setSyncSettings(this.syncSettings);
     
@@ -58,9 +62,8 @@ struct Settings {
       duration: 2000
     });
   }
-  
   @Builder
-  buildSettingItem(title: string, subtitle: string, content: () => void) {
+  SettingItem(title: string, subtitle: string) {
     Column() {
       Row() {
         Column() {
@@ -76,8 +79,67 @@ struct Settings {
           }
         }
         .flexGrow(1)
-        
-        content()
+      }
+      .width('100%')
+      .padding(16)
+    }
+    .backgroundColor('#fff')
+    .borderRadius(8)
+    .margin({ bottom: 12 })
+  }
+
+  @Builder
+  ToggleSettingItem(title: string, subtitle: string, isOn: boolean, onChange: (value: boolean) => void) {
+    Column() {
+      Row() {
+        Column() {
+          Text(title)
+            .fontSize(16)
+            .fontColor('#182431')
+          
+          if (subtitle) {
+            Text(subtitle)
+              .fontSize(12)
+              .fontColor('#6B7280')
+              .margin({ top: 4 })
+          }
+        }
+        .flexGrow(1)
+        Column() {
+          Toggle({ type: ToggleType.Switch, isOn: isOn })
+            .onChange(onChange)
+        }
+      }
+      .width('100%')
+      .padding(16)
+    }
+    .backgroundColor('#fff')
+    .borderRadius(8)
+    .margin({ bottom: 12 })
+  }
+
+  @Builder
+  InputSettingItem(title: string, subtitle: string, value: string, onChange: (value: string) => void) {
+    Column() {
+      Row() {
+        Column() {
+          Text(title)
+            .fontSize(16)
+            .fontColor('#182431')
+          
+          if (subtitle) {
+            Text(subtitle)
+              .fontSize(12)
+              .fontColor('#6B7280')
+              .margin({ top: 4 })
+          }
+        }
+        .flexGrow(1)
+        Column() {
+          TextInput({ placeholder: '1000', text: value })
+            .width(100)
+            .onChange(onChange)
+        }
       }
       .width('100%')
       .padding(16)
@@ -92,7 +154,7 @@ struct Settings {
       // 顶部标题
       Row() {
         Button('返回')
-          .onClick(() => router.back())
+          .onClick((): void => router.back())
         
         Text('设置')
           .fontSize(20)
@@ -119,31 +181,23 @@ struct Settings {
             .fontWeight(FontWeight.Medium)
             .fontColor('#182431')
             .margin({ top: 24, bottom: 16, left: 16 })
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '自动上传拖拽文件',
             '当拖拽文件到远程屏幕时自动上传',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.autoUploadFiles)
-                .onChange((value) => {
-                  this.syncSettings.autoUploadFiles = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.autoUploadFiles,
+            (value: boolean) => {
+              this.syncSettings.autoUploadFiles = value;
+              this.saveSettings();
+            }
           )
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '显示文件传输进度',
             '上传/下载文件时显示进度通知',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.showFileProgress)
-                .onChange((value) => {
-                  this.syncSettings.showFileProgress = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.showFileProgress,
+            (value: boolean) => {
+              this.syncSettings.showFileProgress = value;
+              this.saveSettings();
+            }
           )
           
           // 剪贴板同步设置
@@ -152,50 +206,35 @@ struct Settings {
             .fontWeight(FontWeight.Medium)
             .fontColor('#182431')
             .margin({ top: 24, bottom: 16, left: 16 })
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '自动同步剪贴板',
             '连接建立后自动开始同步剪贴板',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.autoSyncClipboard)
-                .onChange((value) => {
-                  this.syncSettings.autoSyncClipboard = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.autoSyncClipboard,
+            (value: boolean) => {
+              this.syncSettings.autoSyncClipboard = value;
+              this.saveSettings();
+            }
           )
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '仅同步文本',
             '只同步文本内容，不同步文件',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.syncTextOnly)
-                .onChange((value) => {
-                  this.syncSettings.syncTextOnly = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.syncTextOnly,
+            (value: boolean) => {
+              this.syncSettings.syncTextOnly = value;
+              this.saveSettings();
+            }
           )
-          
-          this.buildSettingItem(
+          this.InputSettingItem(
             '同步间隔',
             '剪贴板检查和同步的时间间隔（毫秒）',
-            () => (
-              TextInput({
-                text: this.syncSettings.syncInterval.toString(),
-                placeholder: '1000'
-              })
-              .width(100)
-              .onChange((value) => {
-                const interval = parseInt(value);
-                if (!isNaN(interval) && interval > 0) {
-                  this.syncSettings.syncInterval = interval;
-                  this.saveSettings();
-                }
-              })
-            )
+            this.syncSettings.syncInterval.toString(),
+            (value: string) => {
+              const interval = parseInt(value);
+              if (!isNaN(interval) && interval > 0) {
+                this.syncSettings.syncInterval = interval;
+                this.saveSettings();
+              }
+            }
           )
           
           // 通知设置
@@ -204,39 +243,30 @@ struct Settings {
             .fontWeight(FontWeight.Medium)
             .fontColor('#182431')
             .margin({ top: 24, bottom: 16, left: 16 })
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '显示传输通知',
             '显示文件传输相关的通知',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.showTransferNotifications)
-                .onChange((value) => {
-                  this.syncSettings.showTransferNotifications = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.showTransferNotifications,
+            (value: boolean) => {
+              this.syncSettings.showTransferNotifications = value;
+              this.saveSettings();
+            }
           )
-          
-          this.buildSettingItem(
+          this.ToggleSettingItem(
             '显示剪贴板通知',
             '显示剪贴板同步相关的通知',
-            () => (
-              Toggle({ type: ToggleType.Switch })
-                .isOn(this.syncSettings.showClipboardNotifications)
-                .onChange((value) => {
-                  this.syncSettings.showClipboardNotifications = value;
-                  this.saveSettings();
-                })
-            )
+            this.syncSettings.showClipboardNotifications,
+            (value: boolean) => {
+              this.syncSettings.showClipboardNotifications = value;
+              this.saveSettings();
+            }
           )
-          
           // 保存按钮
           Button('保存设置')
             .width('80%')
             .height(48)
             .margin({ top: 32, bottom: 32 })
-            .onClick(() => this.saveSettings())
+            .onClick((): void => this.saveSettings())
         }
         .padding(16)
       }

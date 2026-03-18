@@ -6,6 +6,12 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import { util } from '@kit.ArkTS';
 import { IFileService } from '../interfaces/IService';
 
+// 文件上传接口
+export interface UploadFile {
+  path?: string;
+  uri?: string;
+}
+
 export class FileService implements IFileService {
   private baseUrl: string;
   private httpModule: http.HttpRequest;
@@ -266,7 +272,7 @@ export class FileService implements IFileService {
   }
 
   // 上传文件（支持拖拽文件上传）
-  async uploadFile(file: any, onProgress?: (progress: number) => void): Promise<string> {
+  async uploadFile(file: UploadFile, onProgress?: (progress: number) => void): Promise<string> {
     try {
       // 这里需要根据HarmonyOS的文件API获取文件路径
       // 假设file对象包含path属性
