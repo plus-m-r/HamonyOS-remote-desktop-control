@@ -202,8 +202,8 @@ export class CmdCodec {
   private static encodeResOpenCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const status = cmdData.status as number || 0;
     
-    // 计算数据长度：status(4)
-    const dataLength = 4;
+    // 计算数据长度：status(1)
+    const dataLength = 1;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -224,19 +224,21 @@ export class CmdCodec {
     offset += 4;
     
     // status
-    view.setInt32(offset, status, false);
+    view.setUint8(offset, status);
     
     return buffer;
   }
 
   /**
    * 编码响应屏幕捕获命令
+   * 格式：status(1) + screenNum(4)
    */
   private static encodeResCaptureCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const status = cmdData.status as number || 0;
+    const screenNum = cmdData.screenNum as number || 1;
     
-    // 计算数据长度：status(4)
-    const dataLength = 4;
+    // 计算数据长度：status(1) + screenNum(4)
+    const dataLength = 1 + 4;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -257,7 +259,11 @@ export class CmdCodec {
     offset += 4;
     
     // status
-    view.setInt32(offset, status, false);
+    view.setUint8(offset, status);
+    offset += 1;
+    
+    // screenNum
+    view.setInt32(offset, screenNum, false);
     
     return buffer;
   }
@@ -516,7 +522,7 @@ export class CmdCodec {
 
   /**
    * 编码请求屏幕捕获命令
-   * 格式：deviceCode长度(4) + deviceCode + password长度(4) + password + captureOp(4)
+   * 格式：deviceCode长度(4) + deviceCode + captureOp(1) + password长度(4) + password
    */
   private static encodeReqCaptureCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
@@ -528,8 +534,8 @@ export class CmdCodec {
     const deviceCodeBytes = encoder.encode(deviceCode);
     const passwordBytes = encoder.encode(password);
     
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + password长度(4) + password字节数 + captureOp(4)
-    const dataLength = 4 + deviceCodeBytes.byteLength + 4 + passwordBytes.byteLength + 4;
+    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + captureOp(1) + password长度(4) + password字节数
+    const dataLength = 4 + deviceCodeBytes.byteLength + 1 + 4 + passwordBytes.byteLength;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -558,6 +564,10 @@ export class CmdCodec {
     dataView.set(deviceCodeBytes);
     offset += deviceCodeBytes.byteLength;
     
+    // captureOp
+    view.setUint8(offset, captureOp);
+    offset += 1;
+    
     // password长度
     view.setUint32(offset, passwordBytes.byteLength, false);
     offset += 4;
@@ -565,10 +575,6 @@ export class CmdCodec {
     // password字节
     const passwordView = new Uint8Array(buffer, offset);
     passwordView.set(passwordBytes);
-    offset += passwordBytes.byteLength;
-    
-    // captureOp
-    view.setInt32(offset, captureOp, false);
     
     return buffer;
   }
@@ -1104,17 +1110,17 @@ export class CmdCodec {
 
   /**
    * 解码 ResOpen 命令（二进制格式）
-   * 格式：status(4)
+   * 格式：status(1)
    */
   private static decodeResOpenCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 4) {
+      if (dataBuffer.byteLength < 1) {
         console.error('CmdCodec: ResOpen data buffer too short');
         return undefined;
       }
 
       const view = new DataView(dataBuffer);
-      const statusValue = view.getInt32(0, false);
+      const statusValue = view.getUint8(0);
       
       // 将数字转换为OpenStatus类型
       let status: OpenStatus = 'OK';
@@ -1140,17 +1146,17 @@ export class CmdCodec {
 
   /**
    * 解码 ResCapture 命令（二进制格式）
-   * 格式：status(4)
+   * 格式：status(1) + screenNum(4)
    */
   private static decodeResCaptureCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 4) {
+      if (dataBuffer.byteLength < 5) {
         console.error('CmdCodec: ResCapture data buffer too short');
         return undefined;
       }
 
       const view = new DataView(dataBuffer);
-      const statusValue = view.getInt32(0, false);
+      const statusValue = view.getUint8(0);
       
       // 将数字转换为CaptureStatus类型
       let status: CaptureStatus = 'OK';
@@ -1515,11 +1521,11 @@ export class CmdCodec {
 
   /**
    * 解码 ReqCapture 命令（二进制格式）
-   * 格式：deviceCode长度(4) + deviceCode + password长度(4) + password + captureOp(4)
+   * 格式：deviceCode长度(4) + deviceCode + captureOp(1) + password长度(4) + password
    */
   private static decodeReqCaptureCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 12) {
+      if (dataBuffer.byteLength < 9) {
         console.error('CmdCodec: ReqCapture data buffer too short');
         return undefined;
       }
@@ -1537,6 +1543,10 @@ export class CmdCodec {
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
 
+      // 读取 captureOp
+      const captureOp = view.getUint8(offset);
+      offset += 1;
+
       // 读取 password 长度
       const passwordLength = view.getUint32(offset, false);
       offset += 4;
@@ -1544,10 +1554,6 @@ export class CmdCodec {
       // 读取 password
       const passwordBytes = dataBuffer.slice(offset, offset + passwordLength);
       const password = decoder.decodeToString(new Uint8Array(passwordBytes));
-      offset += passwordLength;
-
-      // 读取 captureOp
-      const captureOp = view.getInt32(offset, false);
 
       // 创建命令对象
       return CmdUtils.createCaptureCmd(deviceCode, password, captureOp);
@@ -1748,9 +1754,9 @@ export class CmdCodec {
 
   /**
    * 创建屏幕捕获请求命令
+   * @param captureOp 0=START_CAPTURE, 1=STOP_CAPTURE
    */
-  static createCaptureCmd(deviceCode: string, password: string, start: boolean): ConcreteCmd {
-    const captureOp = start ? 1 : 0;
+  static createCaptureCmd(deviceCode: string, password: string, captureOp: number): ConcreteCmd {
     return CmdUtils.createCaptureCmd(deviceCode, password, captureOp);
   }
 

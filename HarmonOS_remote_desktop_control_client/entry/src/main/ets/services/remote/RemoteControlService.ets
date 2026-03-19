@@ -188,6 +188,12 @@ export class RemoteControlService implements IRemoteControlService {
       this.connectionState = ConnectionState.CONNECTED;
       this.reconnectAttempts = 0;
       
+      // 通知UI连接状态更新
+      if (this.connectionCallback) {
+        console.info('RemoteControlService: 通知UI连接已建立');
+        this.connectionCallback(true);
+      }
+      
       // 发送客户端信息请求（模拟Java客户端行为）
       await this.sendReqCliInfoCmd();
       
@@ -702,8 +708,8 @@ export class RemoteControlService implements IRemoteControlService {
     const openCmd = CmdCodec.createOpenCmd(deviceCode);
     await this.sendCmd(openCmd);
     
-    // 2. 发送屏幕捕获请求
-    const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, true);
+    // 2. 发送屏幕捕获请求 (START_CAPTURE = 0x00)
+    const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, 0);
     await this.sendCmd(captureCmd);
   }
 
@@ -716,8 +722,8 @@ export class RemoteControlService implements IRemoteControlService {
     
     console.info(`RemoteControlService: Closing remote screen for device ${this.remoteDeviceCode}`);
     
-    // 发送停止捕获请求
-    const captureCmd = CmdCodec.createCaptureCmd(this.remoteDeviceCode, this.remotePassword, false);
+    // 发送停止捕获请求 (STOP_CAPTURE = 0x01)
+    const captureCmd = CmdCodec.createCaptureCmd(this.remoteDeviceCode, this.remotePassword, 1);
     await this.sendCmd(captureCmd);
   }
 
@@ -838,6 +844,12 @@ export class RemoteControlService implements IRemoteControlService {
   private handleDisconnect(): void {
     this.stopHeartbeat();
     
+    // 通知UI连接状态更新
+    if (this.connectionCallback) {
+      console.info('RemoteControlService: 通知UI连接已断开');
+      this.connectionCallback(false);
+    }
+    
     // 尝试重连
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
@@ -920,22 +932,41 @@ export class RemoteControlService implements IRemoteControlService {
       };
 
       // 发送打开连接请求
-      const openCmd = CmdCodec.createOpenCmd(deviceCode);
-      this.sendCmd(openCmd).catch((error: Error) => {
-        console.error('RemoteControlService: Failed to send open command', error);
-        this.isValidating = false;
-        this.validationCallback = null;
-        resolve({ valid: false, message: '验证失败，请检查网络连接' });
-      });
+      (async () => {
+        try {
+          // 发送打开连接请求
+          const openCmd = CmdCodec.createOpenCmd(deviceCode);
+          console.log('RemoteControlService: Sending ReqOpen command', deviceCode);
+          await this.sendCmd(openCmd);
+          console.log('RemoteControlService: Sent ReqOpen command');
 
-      // 发送屏幕捕获请求（用于验证密码）
-      const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, true);
-      this.sendCmd(captureCmd).catch((error: Error) => {
-        console.error('RemoteControlService: Failed to send capture command', error);
-        this.isValidating = false;
-        this.validationCallback = null;
-        resolve({ valid: false, message: '验证失败，请检查网络连接' });
-      });
+          // 发送屏幕捕获请求（用于验证密码，START_CAPTURE = 0x00）
+          const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, 0);
+          console.log('RemoteControlService: Sending ReqCapture command', deviceCode);
+          await this.sendCmd(captureCmd);
+          console.log('RemoteControlService: Sent ReqCapture command');
+
+          // 由于服务端在验证成功时不会返回响应，直接认为验证成功
+          // 实际的验证结果会通过后续的操作（如屏幕捕获）来确认
+          setTimeout(() => {
+            if (this.isValidating) {
+              console.log('RemoteControlService: Validation timeout, assuming success');
+              this.isValidating = false;
+              this.validationCallback = null;
+              // 更新远程设备信息和控制状态
+              this.remoteDeviceCode = deviceCode;
+              this.remotePassword = password;
+              this.remoteControlEnabled = true;
+              resolve({ valid: true, message: '设备验证成功' });
+            }
+          }, 2000);
+        } catch (error) {
+          console.error('RemoteControlService: Failed to send validation commands', error);
+          this.isValidating = false;
+          this.validationCallback = null;
+          resolve({ valid: false, message: '验证失败，请检查网络连接' });
+        }
+      })();
 
       // 超时处理
       setTimeout(() => {
