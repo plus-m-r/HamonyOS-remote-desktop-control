@@ -5,6 +5,7 @@ export interface DeviceInfo {
   status: 'online' | 'offline';
   lastSeen: string;
   ipAddress?: string;
+  remoteControlEnabled?: boolean; // 是否允许远程控制
 }
 
 // 剪贴板数据模型
@@ -64,7 +65,6 @@ export interface UserInfo {
   avatar?: string;
   licenseType: 'free' | 'paid';
 }
-
 // 会话信息
 export interface SessionInfo {
   sessionId: string;
@@ -72,4 +72,15 @@ export interface SessionInfo {
   remoteDeviceId: string;
   startTime: number;
   status: 'active' | 'paused' | 'ended';
+}
+// 设备验证结果
+export interface DeviceValidationResult {
+  valid: boolean;
+  message: string;
+}
+
+// 设备信息返回类型
+export interface DeviceInfoResult {
+  deviceCode: string;
+  password: string;
 }

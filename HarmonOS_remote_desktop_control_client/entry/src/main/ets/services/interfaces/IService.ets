@@ -1,5 +1,22 @@
 // entry/src/main/ets/services/interfaces/IService.ets
-import { DeviceInfo, ScreenImage, ConnectionState, RemoteControlEvent, Clipboard } from '../../models/DeviceInfo';
+import { ScreenImage, ConnectionState, RemoteControlEvent, Clipboard } from '../../models/DeviceInfo';
+import { ClientInfoCallback, ConnectionCallback, ClipboardCallback } from '../../models/CmdProtocol';
+
+/**
+ * 设备凭据接口
+ */
+export interface DeviceCredentials {
+  deviceCode: string;
+  password: string;
+}
+
+/**
+ * 设备验证结果接口
+ */
+export interface DeviceValidationResult {
+  valid: boolean;
+  message: string;
+}
 
 /**
  * 远程控制服务接口
@@ -18,12 +35,42 @@ export interface IRemoteControlService {
   /**
    * 打开远程屏幕
    */
-  openRemoteScreen(deviceCode: string, password: string): void;
+  openRemoteScreen(deviceCode: string, password: string): Promise<void>;
+
+  /**
+   * 关闭远程屏幕
+   */
+  closeRemoteScreen(): Promise<void>;
 
   /**
    * 发送控制事件
    */
-  sendControlEvent(event: RemoteControlEvent): void;
+  sendControlEvent(event: RemoteControlEvent): Promise<void>;
+
+  /**
+   * 发送鼠标控制
+   */
+  sendMouseControl(x: number, y: number, action: number, wheelDelta?: number): Promise<void>;
+
+  /**
+   * 发送键盘控制
+   */
+  sendKeyControl(keyCode: number, pressed: boolean): Promise<void>;
+
+  /**
+   * 请求剪贴板内容
+   */
+  requestClipboard(): Promise<void>;
+
+  /**
+   * 发送文本剪贴板
+   */
+  sendClipboardText(text: string): Promise<void>;
+
+  /**
+   * 发送文件剪贴板
+   */
+  sendClipboardFile(fileInfoId: string, fileName: string): Promise<void>;
 
   /**
    * 获取连接状态
@@ -34,6 +81,56 @@ export interface IRemoteControlService {
    * 设置屏幕回调
    */
   setScreenCallback(callback: (image: ScreenImage) => void): void;
+
+  /**
+   * 设置客户端信息回调
+   */
+  setClientInfoCallback(callback: ClientInfoCallback): void;
+
+  /**
+   * 设置连接状态回调
+   */
+  setConnectionCallback(callback: ConnectionCallback): void;
+
+  /**
+   * 设置剪贴板回调
+   */
+  setClipboardCallback(callback: ClipboardCallback): void;
+
+  /**
+   * 设置设备信息回调
+   */
+  setDeviceInfoCallback(callback: (deviceCode: string, password: string) => void): void;
+
+  /**
+   * 设置设备信息（用于控制远程设备）
+   */
+  setDeviceInfo(deviceCode: string, password: string): void;
+
+  /**
+   * 设置远程控制权限
+   */
+  setRemoteControlPermission(enabled: boolean): void;
+
+  /**
+   * 验证设备ID和密码
+   */
+  validateDevice(deviceCode: string, password: string): Promise<DeviceValidationResult>;
+
+  /**
+   * 修改密码
+   */
+  changePassword(oldPassword: string, newPassword: string): Promise<void>;
+
+  /**
+   * 获取本地设备信息
+   */
+  getLocalDeviceInfo(): DeviceCredentials;
+
+  /**
+   * 获取远程设备信息
+   */
+  getRemoteDeviceInfo(): DeviceCredentials;
 }
 
 /**

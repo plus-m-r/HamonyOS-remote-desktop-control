@@ -4,6 +4,7 @@ import { AppStateManager } from '../state/AppStateManager';
 import prompt from '@ohos.promptAction';
 import hilog from '@ohos.hilog';
 import router from '@ohos.router';
+import pasteboard from '@ohos.pasteboard';
 
 const TAG = 'IndexPage';
 const DOMAIN = 0x0000;
@@ -16,15 +17,13 @@ struct Index {
   @State deviceIdInput: string = '';
   @State devicePasswordInput: string = '';
   @State waitingForServerInfo: boolean = true;
+  @State remoteControlEnabled: boolean = true;
+  @State isConnecting: boolean = false;
   
   async aboutToAppear() {
     hilog.info(DOMAIN, TAG, 'Index页面开始加载');
     
-    // 初始化服务
     try {
-      hilog.info(DOMAIN, TAG, '开始初始化服务...');
-      await ServiceProvider.initialize();
-      
       // 获取远程控制服务
       const remoteControlService = ServiceProvider.remoteControlService;
       
@@ -47,27 +46,17 @@ struct Index {
         });
       });
       
-      // 连接到服务器以获取设备信息
-      await remoteControlService.connect(
-        () => {
-          hilog.info(DOMAIN, TAG, '连接到服务器成功，等待设备信息...');
-        },
-        (error: string) => {
-          hilog.error(DOMAIN, TAG, '连接到服务器失败: %{public}s', error);
-          prompt.showToast({
-            message: '连接服务器失败，请检查网络',
-            duration: 3000
-          });
-        }
-      );
-      
-      // 获取用户信息（初始为空，等待服务器分配）
+      // 获取用户信息
       this.userId = AppStateManager.getUserId();
       this.userPassword = AppStateManager.getUserPassword();
       
-      hilog.info(DOMAIN, TAG, '用户信息 - ID: %{public}s, 密码: %{public}s', 
+      // 获取远程控制权限状态
+      this.remoteControlEnabled = AppStateManager.isRemoteControlEnabled();
+      
+      hilog.info(DOMAIN, TAG, '用户信息 - ID: %{public}s, 密码: %{public}s, 远程控制权限: %{public}s', 
         this.userId || '未分配', 
-        this.userPassword || '未分配');
+        this.userPassword || '未分配',
+        this.remoteControlEnabled ? '已启用' : '已禁用');
       
       // 如果用户ID为空，显示等待服务器分配状态
       if (!this.userId) {
@@ -80,23 +69,17 @@ struct Index {
         this.waitingForServerInfo = false;
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, '服务初始化失败: %{public}s', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, '页面初始化失败: %{public}s', JSON.stringify(error));
       prompt.showToast({
-        message: '服务初始化失败，请检查网络连接',
+        message: '页面初始化失败，请检查网络连接',
         duration: 3000
       });
     }
   }
 
-  // 页面销毁时断开连接
+  // 页面销毁时不再断开连接，保持应用级连接
   aboutToDisappear(): void {
-    // 断开与服务器的连接
-    try {
-      ServiceProvider.remoteControlService.disconnect();
-      hilog.info(DOMAIN, TAG, 'Index页面销毁，断开服务器连接');
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, '断开连接失败: %{public}s', JSON.stringify(error));
-    }
+    hilog.info(DOMAIN, TAG, 'Index页面销毁');
   }
 
   // 连接到远程设备
@@ -109,16 +92,34 @@ struct Index {
       return;
     }
 
+    // 防重复点击
+    if (this.isConnecting) {
+      return;
+    }
+
     try {
-      hilog.info(DOMAIN, TAG, '正在连接到设备: %{public}s', this.deviceIdInput);
+      this.isConnecting = true;
+      hilog.info(DOMAIN, TAG, '正在验证设备: %{public}s', this.deviceIdInput);
       
       prompt.showToast({
-        message: '正在连接...',
+        message: '正在验证设备信息...',
         duration: 2000
       });
 
-      // 设置设备信息
+      // 验证设备ID和密码
       const remoteControlService = ServiceProvider.remoteControlService;
+      const validationResult = await remoteControlService.validateDevice(this.deviceIdInput, this.devicePasswordInput);
+      
+      if (!validationResult.valid) {
+        hilog.error(DOMAIN, TAG, '设备验证失败: %{public}s', validationResult.message);
+        prompt.showToast({ 
+          message: validationResult.message,
+          duration: 3000 
+        });
+        return;
+      }
+
+      // 验证成功，设置设备信息
       remoteControlService.setDeviceInfo(this.deviceIdInput, this.devicePasswordInput);
       
       // 跳转到控制页面
@@ -136,6 +137,8 @@ struct Index {
         message: '连接失败，请检查设备ID和密码', 
         duration: 3000 
       });
+    } finally {
+      this.isConnecting = false;
     }
   }
 
@@ -155,6 +158,48 @@ struct Index {
       message: '密码已复制',
       duration: 2000
     });
+  }
+
+  // 一键复制设备ID和连接密码
+  copyAllDeviceInfo() {
+    if (!this.userId || !this.userPassword) {
+      prompt.showToast({
+        message: '设备信息未获取，无法复制',
+        duration: 2000
+      });
+      return;
+    }
+
+    try {
+      // 创建剪贴板数据
+      const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, `设备ID: ${this.userId}\n连接密码: ${this.userPassword}`);
+      
+      // 获取系统剪贴板
+      const systemPasteboard = pasteboard.getSystemPasteboard();
+      
+      // 写入剪贴板
+      systemPasteboard.setData(pasteData, (err) => {
+        if (err) {
+          hilog.error(DOMAIN, TAG, '复制到剪贴板失败: %{public}s', JSON.stringify(err));
+          prompt.showToast({
+            message: '复制失败，请重试',
+            duration: 2000
+          });
+        } else {
+          hilog.info(DOMAIN, TAG, '设备信息已复制到剪贴板 - ID: %{public}s, 密码: %{public}s', this.userId, this.userPassword);
+          prompt.showToast({
+            message: '设备ID和密码已复制到剪贴板',
+            duration: 2000
+          });
+        }
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '复制设备信息失败: %{public}s', JSON.stringify(error));
+      prompt.showToast({
+        message: '复制失败，请检查权限',
+        duration: 2000
+      });
+    }
   }
   // 鸿蒙风格卡片组件
   @Builder
@@ -261,19 +306,10 @@ struct Index {
             .fontColor('#182431')
             .layoutWeight(2)
             .textAlign(TextAlign.End)
-            .margin({ right: 8 });
-          
-          Button('复制', { type: ButtonType.Capsule })
-            .fontSize(12)
-            .fontColor('#007DFF')
-            .backgroundColor('#F0F9FF')
-            .borderColor('#007DFF')
-            .borderWidth(1)
-            .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-            .onClick(() => this.copyDeviceId());
+            .padding({ top: 6, bottom: 6 });
         }
         .width('100%')
-        .margin({ bottom: 12 });
+        .margin({ bottom: 13 });
 
         // 分割线
         Divider()
@@ -281,7 +317,7 @@ struct Index {
           .color('#E5E7EB')
           .margin({ bottom: 12 });
 
-        // 密码显示
+        // 密码显示 (始终隐藏)
         Row() {
           Text('连接密码:')
             .fontSize(14)
@@ -289,23 +325,57 @@ struct Index {
             .fontColor('#374151')
             .layoutWeight(1);
           
-          Text(this.userPassword || '未分配')
+          Text(this.userPassword ? '••••••••' : '未分配')
             .fontSize(14)
             .fontColor('#182431')
             .layoutWeight(2)
             .textAlign(TextAlign.End)
-            .margin({ right: 8 });
-          
-          Button('复制', { type: ButtonType.Capsule })
-            .fontSize(12)
-            .fontColor('#007DFF')
-            .backgroundColor('#F0F9FF')
-            .borderColor('#007DFF')
-            .borderWidth(1)
-            .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-            .onClick(() => this.copyPassword());
+            .padding({ top: 6, bottom: 6 });
         }
-        .width('100%');
+        .width('100%')
+        .margin({ bottom: 13 });
+
+        // 分割线
+        Divider()
+          .strokeWidth(1)
+          .color('#E5E7EB')
+          .margin({ bottom: 12 });
+
+        // 远程控制权限开关
+        Row() {
+          Text('远程控制权限:')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#374151')
+            .layoutWeight(1);
+          
+          Toggle({ type: ToggleType.Switch, isOn: this.remoteControlEnabled })
+            .selectedColor('#007DFF')
+            .switchPointColor('#FFFFFF')
+            .onChange((isOn: boolean) => {
+              this.onRemoteControlToggleChange(isOn);
+            })
+            .width(45)  // 设置固定宽度，缩小开关大小
+            .margin({ left: 8 });  // 添加左边距，避免太靠近文本
+        }
+        .width('100%')
+        .margin({ bottom: 13 });
+
+        // 分割线
+        Divider()
+          .strokeWidth(1)
+          .color('#E5E7EB')
+          .margin({ bottom: 12 });
+
+        // 一键复制按钮 - 使用与连接设备按钮相同的样式
+        Button('一键复制', { type: ButtonType.Capsule })
+          .fontSize(16)
+          .fontColor(Color.White)
+          .backgroundColor('#007DFF')
+          .width('100%')
+          .height(44)
+          .margin({ top: -1 })
+          .onClick(() => this.copyAllDeviceInfo());
       }
     }
     .width('100%');
@@ -377,5 +447,30 @@ struct Index {
         .onClick(() => this.connectToDevice());
     }
     .width('100%');
+  }
+
+  // 远程控制权限开关变化处理
+  onRemoteControlToggleChange(isOn: boolean): void {
+    hilog.info(DOMAIN, TAG, '远程控制权限开关状态变化: %{public}s', isOn ? '开启' : '关闭');
+    
+    // 更新本地状态
+    this.remoteControlEnabled = isOn;
+    
+    // 保存到全局状态管理器
+    AppStateManager.setRemoteControlEnabled(isOn);
+    
+    // 显示提示
+    prompt.showToast({
+      message: isOn ? '远程控制权限已开启' : '远程控制权限已关闭',
+      duration: 2000
+    });
+    
+    // 通知远程控制服务权限状态变化
+    try {
+      ServiceProvider.remoteControlService.setRemoteControlPermission(isOn);
+      hilog.info(DOMAIN, TAG, '已通知远程控制服务权限状态: %{public}s', isOn ? '已开启' : '已关闭');
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '通知远程控制服务权限状态失败: %{public}s', JSON.stringify(error));
+    }
   }
 }

@@ -22,6 +22,7 @@ export interface StateKeys {
   UPLOAD_PROGRESS: string;
   DOWNLOAD_PROGRESS: string;
   ERROR_MESSAGE: string;
+  REMOTE_CONTROL_ENABLED: string;
 }
 
 /**
@@ -44,6 +45,7 @@ export class StateKeysImpl implements StateKeys {
   DOWNLOAD_PROGRESS: string = 'downloadProgress';
   ERROR_MESSAGE: string = 'errorMessage';
   SYNC_SETTINGS: string = 'syncSettings';
+  REMOTE_CONTROL_ENABLED: string = 'remoteControlEnabled';
 }
 
 /**
@@ -99,6 +101,9 @@ export class AppStateManager {
     
     // 错误信息
     AppStorage.setOrCreate<string>(STATE_KEYS.ERROR_MESSAGE, '');
+    
+    // 远程控制权限（默认允许，用户可关闭）
+    AppStorage.setOrCreate<boolean>(STATE_KEYS.REMOTE_CONTROL_ENABLED, true);
     
     console.info('AppStateManager: Global state initialized');
   }
@@ -237,6 +242,17 @@ export class AppStateManager {
 
   static clearError(): void {
     AppStorage.set(STATE_KEYS.ERROR_MESSAGE, '');
+  }
+
+  // ============ 远程控制权限管理 ============
+
+  static setRemoteControlEnabled(enabled: boolean): void {
+    AppStorage.set(STATE_KEYS.REMOTE_CONTROL_ENABLED, enabled);
+    console.info(`AppStateManager: Remote control permission ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  static isRemoteControlEnabled(): boolean {
+    return AppStorage.get(STATE_KEYS.REMOTE_CONTROL_ENABLED) as boolean;
   }
 
   // ============ 同步设置管理 ============

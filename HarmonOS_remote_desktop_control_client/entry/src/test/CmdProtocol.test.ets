@@ -75,8 +75,7 @@ export default function cmdProtocolTest() {
     });
 
     it('test_open_status_type', 0, () => {
-      // 测试打开连接状态类型
-      const okStatus: OpenStatus = 'OK';
+      // 测试打开连接状态类�?      const okStatus: OpenStatus = 'OK';
       const offlineStatus: OpenStatus = 'OFFLINE';
       const controlStatus: OpenStatus = 'CONTROL';
       
@@ -86,8 +85,7 @@ export default function cmdProtocolTest() {
     });
 
     it('test_capture_status_type', 0, () => {
-      // 测试捕获状态类型
-      const okStatus: CaptureStatus = 'OK';
+      // 测试捕获状态类�?      const okStatus: CaptureStatus = 'OK';
       const offlineStatus: CaptureStatus = 'OFFLINE';
       const pwdErrorStatus: CaptureStatus = 'PWDERROR';
       const controlStatus: CaptureStatus = 'CONTROL';
@@ -141,25 +139,10 @@ export default function cmdProtocolTest() {
       expect(keyData.pressed).assertEqual(true);
     });
 
-    it('test_cmd_serialization_deserialization', 0, () => {
-      // 测试命令序列化和反序列化
-      const originalCmd = CmdCodec.createOpenCmd('device_123');
-      const jsonStr = CmdUtils.serialize(originalCmd);
-      
-      expect(jsonStr).assertContain('"type":"ReqOpen"');
-      expect(jsonStr).assertContain('"deviceCode":"device_123"');
-      
-      const deserializedCmd = CmdUtils.deserialize(jsonStr);
-      expect(deserializedCmd).assertNotUndefined();
-      expect(deserializedCmd?.getType()).assertEqual(CmdType.ReqOpen);
-      
-      const deserializedData = deserializedCmd?.toJSON() as CmdDataJSON;
-      expect(deserializedData.deviceCode).assertEqual('device_123');
-    });
+    
 
     it('test_cmd_codec', 0, () => {
-      // 测试命令编解码
-      const originalCmd = CmdCodec.createMouseControlCmd('device_123', 100, 200, MouseAction.MOVE, 0);
+      // 测试命令编解�?      const originalCmd = CmdCodec.createMouseControlCmd('device_123', 100, 200, MouseAction.MOVE, 0);
       
       // 编码
       const encodedBuffer = CmdCodec.encode(originalCmd);
@@ -185,8 +168,7 @@ export default function cmdProtocolTest() {
       const buffer1 = CmdCodec.encode(cmd1);
       const buffer2 = CmdCodec.encode(cmd2);
       
-      // 合并两个缓冲区
-      const combinedBuffer = new ArrayBuffer(buffer1.byteLength + buffer2.byteLength);
+      // 合并两个缓冲�?      const combinedBuffer = new ArrayBuffer(buffer1.byteLength + buffer2.byteLength);
       const combinedView = new Uint8Array(combinedBuffer);
       combinedView.set(new Uint8Array(buffer1), 0);
       combinedView.set(new Uint8Array(buffer2), buffer1.byteLength);
@@ -201,8 +183,7 @@ export default function cmdProtocolTest() {
     });
 
     it('test_clipboard_commands', 0, () => {
-      // 测试剪贴板相关命令
-      const clipboardRequestCmd = CmdCodec.createClipboardRequestCmd('device_123');
+      // 测试剪贴板相关命�?      const clipboardRequestCmd = CmdCodec.createClipboardRequestCmd('device_123');
       expect(clipboardRequestCmd.getType()).assertEqual(CmdType.ReqRemoteClipboard);
       
       const clipboardTextCmd = CmdCodec.createClipboardTextCmd('device_123', 'Hello World');

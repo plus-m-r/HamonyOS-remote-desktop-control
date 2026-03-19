@@ -1,10 +1,12 @@
+
 import { RemoteControlEvent, ScreenImage, ConnectionState } from '../../models/DeviceInfo';
-import { IRemoteControlService } from '../interfaces/IService';
+import { IRemoteControlService, DeviceValidationResult, DeviceCredentials } from '../interfaces/IService';
 import socket from '@ohos.net.socket';
 import { BusinessError } from '@ohos.base';
 import { util } from '@kit.ArkTS';
 import { CmdCodec } from '../../network/CmdCodec';
 import { ConcreteCmd } from '../../models/ConcreteCmd';
+import hilog from '@ohos.hilog';
 import { 
   CmdType, 
   ScreenCallback,
@@ -13,6 +15,10 @@ import {
   ClipboardCallback,
   ClipboardData
 } from '../../models/CmdProtocol';
+
+// 日志相关常量
+const DOMAIN: number = 0xFF00;
+const TAG: string = 'RemoteControlService';
 
 // 命令数据JSON接口
 interface CmdDataJSON {
@@ -47,7 +53,6 @@ interface CmdDataJSON {
   type?: CmdType;
   id?: string;
 }
-
 export class RemoteControlService implements IRemoteControlService {
   private host: string;
   private port: number;
@@ -64,8 +69,13 @@ export class RemoteControlService implements IRemoteControlService {
   private heartbeatInterval: number = 3000; // 3秒，与Java客户端保持一致
   private heartbeatTimer: number = -1;
   private receiveBuffer: ArrayBuffer = new ArrayBuffer(0);
-  private deviceCode: string = '';
-  private password: string = '';
+  private localDeviceCode: string = '';
+  private localPassword: string = '';
+  private remoteDeviceCode: string = '';
+  private remotePassword: string = '';
+  private remoteControlEnabled: boolean = false;
+  private validationCallback: ((result: DeviceValidationResult) => void) | null = null;
+  private isValidating: boolean = false;
 
   constructor(
     host: string, 
@@ -120,12 +130,35 @@ export class RemoteControlService implements IRemoteControlService {
     this.deviceInfoCallback = callback;
   }
 
-  /**
-   * 设置设备信息
-   */
+
   setDeviceInfo(deviceCode: string, password: string): void {
-    this.deviceCode = deviceCode;
-    this.password = password;
+    // 设置用于控制远程设备的信息，不影响本地设备信息
+    this.remoteDeviceCode = deviceCode;
+    this.remotePassword = password;
+  }
+
+  // 获取本地设备信息
+  getLocalDeviceInfo(): DeviceCredentials {
+    return {
+      deviceCode: this.localDeviceCode,
+      password: this.localPassword
+    };
+  }
+
+  // 获取远程设备信息
+  getRemoteDeviceInfo(): DeviceCredentials {
+    return {
+      deviceCode: this.remoteDeviceCode,
+      password: this.remotePassword
+    };
+  }
+
+  /**
+   * 设置远程控制权限
+   */
+  setRemoteControlPermission(enabled: boolean): void {
+    this.remoteControlEnabled = enabled;
+    hilog.info(DOMAIN, TAG, '远程控制权限设置: %{public}s', enabled ? '已启用' : '已禁用');
   }
 
   // 连接到服务端
@@ -251,6 +284,30 @@ export class RemoteControlService implements IRemoteControlService {
       case CmdType.ResPong:
         this.handlePongCommand(cmd);
         break;
+      case CmdType.ClipboardText:
+        this.handleClipboardTextCommand(cmd);
+        break;
+      case CmdType.ClipboardTransfer:
+        this.handleClipboardTransferCommand(cmd);
+        break;
+      case CmdType.KeyControl:
+        this.handleKeyControlCommand(cmd);
+        break;
+      case CmdType.MouseControl:
+        this.handleMouseControlCommand(cmd);
+        break;
+      case CmdType.CaptureConfig:
+        this.handleCaptureConfigCommand(cmd);
+        break;
+      case CmdType.CompressorConfig:
+        this.handleCompressorConfigCommand(cmd);
+        break;
+      case CmdType.SelectScreen:
+        this.handleSelectScreenCommand(cmd);
+        break;
+      case CmdType.ChangePwd:
+        this.handleChangePwdCommand(cmd);
+        break;
       default:
         console.log(`RemoteControlService: Received command type: ${cmdType}`);
         break;
@@ -292,9 +349,10 @@ export class RemoteControlService implements IRemoteControlService {
       
       console.log(`RemoteControlService: Received client info from server - deviceCode: ${deviceCode}, password: ${password}`);
       
-      // 保存设备信息
-      this.deviceCode = deviceCode;
-      this.password = password;
+      // 每次收到服务器分配的设备信息都更新，确保与服务器保持同步
+      // 保存本地设备信息（服务器分配的）
+      this.localDeviceCode = deviceCode;
+      this.localPassword = password;
       
       // 调用设备信息回调（通知UI更新）
       if (this.deviceInfoCallback) {
@@ -320,7 +378,29 @@ export class RemoteControlService implements IRemoteControlService {
       
       console.log(`RemoteControlService: Open response - status: ${status}`);
       
-      // 根据状态处理
+      // 如果正在验证，处理验证结果
+      if (this.isValidating && this.validationCallback) {
+        switch (status) {
+          case 'OK':
+            console.log('RemoteControlService: Connection opened successfully');
+            break;
+          case 'OFFLINE':
+            console.error('RemoteControlService: Target device is offline');
+            this.validationCallback({ valid: false, message: '目标设备离线' });
+            break;
+          case 'CONTROL':
+            console.error('RemoteControlService: Target device is being controlled by another client');
+            this.validationCallback({ valid: false, message: '目标设备正在被其他客户端控制' });
+            break;
+          default:
+            console.error('RemoteControlService: Unknown open response status:', status);
+            this.validationCallback({ valid: false, message: '验证失败，请检查设备ID' });
+            break;
+        }
+        return;
+      }
+      
+      // 正常处理
       switch (status) {
         case 'OK':
           console.log('RemoteControlService: Connection opened successfully');
@@ -344,7 +424,37 @@ export class RemoteControlService implements IRemoteControlService {
       
       console.log(`RemoteControlService: Capture response - status: ${status}`);
       
-      // 根据状态处理
+      // 如果正在验证，处理验证结果
+      if (this.isValidating && this.validationCallback) {
+        switch (status) {
+          case 'OK':
+            console.log('RemoteControlService: Screen capture started successfully');
+            this.validationCallback({ valid: true, message: '设备验证成功' });
+            break;
+          case 'OFFLINE':
+            console.error('RemoteControlService: Target device is offline');
+            this.validationCallback({ valid: false, message: '目标设备离线' });
+            break;
+          case 'PWDERROR':
+            console.error('RemoteControlService: Invalid password');
+            this.validationCallback({ valid: false, message: '密码错误，请检查输入' });
+            break;
+          case 'CONTROL':
+            console.error('RemoteControlService: Target device is being controlled by another client');
+            this.validationCallback({ valid: false, message: '目标设备正在被其他客户端控制' });
+            break;
+          case 'STOP':
+            console.log('RemoteControlService: Screen capture stopped');
+            break;
+          default:
+            console.error('RemoteControlService: Unknown capture response status:', status);
+            this.validationCallback({ valid: false, message: '验证失败，请检查设备ID和密码' });
+            break;
+        }
+        return;
+      }
+      
+      // 正常处理
       switch (status) {
         case 'OK':
           console.log('RemoteControlService: Screen capture started successfully');
@@ -385,6 +495,143 @@ export class RemoteControlService implements IRemoteControlService {
   // 处理心跳响应命令
   private handlePongCommand(cmd: ConcreteCmd): void {
     console.log('RemoteControlService: Received pong response');
+  }
+
+  // 处理文本剪贴板命令
+  private handleClipboardTextCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const text = cmdData.text as string;
+      const deviceCode = cmdData.deviceCode as string;
+      
+      console.log(`RemoteControlService: Received clipboard text from device ${deviceCode}`);
+      
+      if (this.clipboardCallback) {
+        this.clipboardCallback([{
+          deviceCode: deviceCode,
+          text: text
+        }]);
+      }
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle clipboard text command', error);
+    }
+  }
+
+  // 处理文件剪贴板命令
+  private handleClipboardTransferCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const fileInfoId = cmdData.fileInfoId as string;
+      const fileName = cmdData.fileName as string;
+      const deviceCode = cmdData.deviceCode as string;
+      
+      console.log(`RemoteControlService: Received clipboard transfer from device ${deviceCode}: ${fileName}`);
+      
+      if (this.clipboardCallback) {
+        this.clipboardCallback([{
+          deviceCode: deviceCode,
+          fileInfoId: fileInfoId,
+          fileName: fileName,
+          isFile: 1
+        }]);
+      }
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle clipboard transfer command', error);
+    }
+  }
+
+  // 处理键盘控制命令
+  private handleKeyControlCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const keyCode = cmdData.keyCode as number;
+      const pressed = cmdData.pressed as boolean;
+      const deviceCode = cmdData.deviceCode as string;
+      
+      console.log(`RemoteControlService: Received key control from device ${deviceCode}: keyCode=${keyCode}, pressed=${pressed}`);
+      
+      // 这里可以添加键盘控制的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle key control command', error);
+    }
+  }
+
+  // 处理鼠标控制命令
+  private handleMouseControlCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const x = cmdData.x as number;
+      const y = cmdData.y as number;
+      const action = cmdData.action as number;
+      const wheelDelta = cmdData.wheelDelta as number;
+      const deviceCode = cmdData.deviceCode as string;
+      
+      console.log(`RemoteControlService: Received mouse control from device ${deviceCode}: x=${x}, y=${y}, action=${action}`);
+      
+      // 这里可以添加鼠标控制的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle mouse control command', error);
+    }
+  }
+
+  // 处理屏幕捕获配置命令
+  private handleCaptureConfigCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const fps = cmdData.fps as number;
+      const quality = cmdData.quality as number;
+      const width = cmdData.width as number;
+      const height = cmdData.height as number;
+      
+      console.log(`RemoteControlService: Received capture config: fps=${fps}, quality=${quality}, width=${width}, height=${height}`);
+      
+      // 这里可以添加捕获配置的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle capture config command', error);
+    }
+  }
+
+  // 处理压缩配置命令
+  private handleCompressorConfigCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const compressionMethod = cmdData.compressionMethod as number;
+      const compressionLevel = cmdData.compressionLevel as number;
+      
+      console.log(`RemoteControlService: Received compressor config: method=${compressionMethod}, level=${compressionLevel}`);
+      
+      // 这里可以添加压缩配置的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle compressor config command', error);
+    }
+  }
+
+  // 处理选择屏幕命令
+  private handleSelectScreenCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const screenIndex = cmdData.screenIndex as number;
+      
+      console.log(`RemoteControlService: Received select screen command: screenIndex=${screenIndex}`);
+      
+      // 这里可以添加选择屏幕的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle select screen command', error);
+    }
+  }
+
+  // 处理修改密码命令
+  private handleChangePwdCommand(cmd: ConcreteCmd): void {
+    try {
+      const cmdData = cmd.toJSON() as CmdDataJSON;
+      const password = cmdData.password as string;
+      
+      console.log('RemoteControlService: Received change password command');
+      
+      // 这里可以添加修改密码的处理逻辑
+    } catch (error) {
+      console.error('RemoteControlService: Failed to handle change password command', error);
+    }
   }
 
   // 解析屏幕图像
@@ -433,6 +680,12 @@ export class RemoteControlService implements IRemoteControlService {
 
   // 发送远程控制事件
   async sendControlEvent(event: RemoteControlEvent): Promise<void> {
+    // 检查远程控制权限
+    if (!this.remoteControlEnabled) {
+      hilog.warn(DOMAIN, TAG, '远程控制权限未启用，忽略控制事件: %{public}s', event.type);
+      return;
+    }
+    
     // 兼容旧接口，转换为新的命令格式
     if (event.type === 'mouse') {
       await this.sendMouseControl(event.x || 0, event.y || 0, event.action === 'down' ? 1 : 0);
@@ -456,70 +709,82 @@ export class RemoteControlService implements IRemoteControlService {
 
   // 关闭远程屏幕
   async closeRemoteScreen(): Promise<void> {
-    if (!this.deviceCode || !this.password) {
-      console.error('RemoteControlService: Device info not set');
+    if (!this.remoteDeviceCode || !this.remotePassword) {
+      console.error('RemoteControlService: Remote device info not set');
       return;
     }
     
-    console.info(`RemoteControlService: Closing remote screen for device ${this.deviceCode}`);
+    console.info(`RemoteControlService: Closing remote screen for device ${this.remoteDeviceCode}`);
     
     // 发送停止捕获请求
-    const captureCmd = CmdCodec.createCaptureCmd(this.deviceCode, this.password, false);
+    const captureCmd = CmdCodec.createCaptureCmd(this.remoteDeviceCode, this.remotePassword, false);
     await this.sendCmd(captureCmd);
   }
 
   // 发送鼠标控制
   async sendMouseControl(x: number, y: number, action: number, wheelDelta?: number): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.remoteDeviceCode) {
+      console.error('RemoteControlService: Remote device code not set');
+      return;
+    }
+
+    // 检查远程控制权限
+    if (!this.remoteControlEnabled) {
+      console.warn('RemoteControlService: Remote control permission denied');
       return;
     }
     
-    const mouseCmd = CmdCodec.createMouseControlCmd(this.deviceCode, x, y, action, wheelDelta);
+    const mouseCmd = CmdCodec.createMouseControlCmd(this.remoteDeviceCode, x, y, action, wheelDelta);
     await this.sendCmd(mouseCmd);
   }
 
   // 发送键盘控制
   async sendKeyControl(keyCode: number, pressed: boolean): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.remoteDeviceCode) {
+      console.error('RemoteControlService: Remote device code not set');
+      return;
+    }
+
+    // 检查远程控制权限
+    if (!this.remoteControlEnabled) {
+      console.warn('RemoteControlService: Remote control permission denied');
       return;
     }
     
-    const keyCmd = CmdCodec.createKeyControlCmd(this.deviceCode, keyCode, pressed);
+    const keyCmd = CmdCodec.createKeyControlCmd(this.remoteDeviceCode, keyCode, pressed);
     await this.sendCmd(keyCmd);
   }
 
   // 请求剪贴板内容
   async requestClipboard(): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.remoteDeviceCode) {
+      console.error('RemoteControlService: Remote device code not set');
       return;
     }
     
-    const clipboardCmd = CmdCodec.createClipboardRequestCmd(this.deviceCode);
+    const clipboardCmd = CmdCodec.createClipboardRequestCmd(this.remoteDeviceCode);
     await this.sendCmd(clipboardCmd);
   }
 
   // 发送文本剪贴板
   async sendClipboardText(text: string): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.remoteDeviceCode) {
+      console.error('RemoteControlService: Remote device code not set');
       return;
     }
     
-    const textCmd = CmdCodec.createClipboardTextCmd(this.deviceCode, text);
+    const textCmd = CmdCodec.createClipboardTextCmd(this.remoteDeviceCode, text);
     await this.sendCmd(textCmd);
   }
 
   // 发送文件剪贴板
   async sendClipboardFile(fileInfoId: string, fileName: string): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.remoteDeviceCode) {
+      console.error('RemoteControlService: Remote device code not set');
       return;
     }
     
-    const fileCmd = CmdCodec.createClipboardTransferCmd(this.deviceCode, fileInfoId, fileName);
+    const fileCmd = CmdCodec.createClipboardTransferCmd(this.remoteDeviceCode, fileInfoId, fileName);
     await this.sendCmd(fileCmd);
   }
 
@@ -610,8 +875,8 @@ export class RemoteControlService implements IRemoteControlService {
 
   // 修改密码
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    if (!this.deviceCode) {
-      console.error('RemoteControlService: Device code not set');
+    if (!this.localDeviceCode) {
+      console.error('RemoteControlService: Local device code not set');
       throw new Error('设备信息未设置');
     }
 
@@ -622,15 +887,64 @@ export class RemoteControlService implements IRemoteControlService {
 
     try {
       // 创建修改密码命令
-      const changePwdCmd = CmdCodec.createChangePwdCmd(this.deviceCode, oldPassword, newPassword);
+      const changePwdCmd = CmdCodec.createChangePwdCmd(this.localDeviceCode, oldPassword, newPassword);
       await this.sendCmd(changePwdCmd);
       
       // 更新本地密码
-      this.password = newPassword;
+      this.localPassword = newPassword;
       console.info('RemoteControlService: Password change request sent');
     } catch (error) {
       console.error('RemoteControlService: Failed to send password change command', error);
-      throw new Error(error as string);
+      throw new Error(String(error));
     }
+  }
+  // 验证设备ID和密码
+  async validateDevice(deviceCode: string, password: string): Promise<DeviceValidationResult> {
+    if (!this.socket || this.connectionState !== ConnectionState.CONNECTED) {
+      console.error('RemoteControlService: Not connected');
+      return { valid: false, message: '未连接到服务器' };
+    }
+
+    // 防止并发验证
+    if (this.isValidating) {
+      console.warn('RemoteControlService: Validation already in progress');
+      return { valid: false, message: '验证正在进行中，请稍后再试' };
+    }
+
+    return new Promise<DeviceValidationResult>((resolve) => {
+      this.isValidating = true;
+      this.validationCallback = (result: DeviceValidationResult) => {
+        this.isValidating = false;
+        this.validationCallback = null;
+        resolve(result);
+      };
+
+      // 发送打开连接请求
+      const openCmd = CmdCodec.createOpenCmd(deviceCode);
+      this.sendCmd(openCmd).catch((error: Error) => {
+        console.error('RemoteControlService: Failed to send open command', error);
+        this.isValidating = false;
+        this.validationCallback = null;
+        resolve({ valid: false, message: '验证失败，请检查网络连接' });
+      });
+
+      // 发送屏幕捕获请求（用于验证密码）
+      const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, true);
+      this.sendCmd(captureCmd).catch((error: Error) => {
+        console.error('RemoteControlService: Failed to send capture command', error);
+        this.isValidating = false;
+        this.validationCallback = null;
+        resolve({ valid: false, message: '验证失败，请检查网络连接' });
+      });
+
+      // 超时处理
+      setTimeout(() => {
+        if (this.isValidating) {
+          this.isValidating = false;
+          this.validationCallback = null;
+          resolve({ valid: false, message: '验证超时，请检查网络连接' });
+        }
+      }, 5000);
+    });
   }
 }

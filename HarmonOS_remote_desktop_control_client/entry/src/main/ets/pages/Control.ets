@@ -1,12 +1,16 @@
 // 远程控制页面 - 实现无感文件传输和剪贴板同步
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
-import prompt from '@ohos.promptAction';
+import promptAction from '@ohos.promptAction';
 import hilog from '@ohos.hilog';
 import router from '@ohos.router';
 import { AppState } from '../state/AppStateManager';
 import { ScreenImage } from '../models/DeviceInfo';
 import { UploadFile } from '../services/file/FileService';
+
+
+
+
 
 const TAG = 'ControlPage';
 const DOMAIN = 0x0000;
@@ -18,6 +22,12 @@ interface UploadableFile {
   path?: string;
   uri?: string;
 }
+
+// 触摸点接口
+interface TouchPoint {
+  x: number;
+  y: number;
+}
 @Entry
 @Component
 struct Control {
@@ -28,6 +38,8 @@ struct Control {
   @State screenWidth: number = 0;
   @State screenHeight: number = 0;
   @State isToolbarVisible: boolean = true;
+  @State lastTouchX: number = 0;
+  @State lastTouchY: number = 0;
 
   private remoteControlService = ServiceProvider.remoteControlService;
   private fileService = ServiceProvider.fileService;
@@ -60,53 +72,59 @@ struct Control {
     });
   }
   aboutToDisappear(): void {
-    // 断开连接
-    this.remoteControlService.disconnect();
+    // 不再断开连接，保持应用级连接
   }
 
   async connectToServer() {
     try {
-      await this.remoteControlService.connect(
-        () => {
-          hilog.info(DOMAIN, TAG, '连接成功');
-          prompt.showToast({
-            message: '连接成功',
-            duration: 2000
-          });
-
-          // 如果有远程设备ID，打开远程屏幕
-          if (this.remoteDeviceId) {
-            this.openRemoteScreen();
-          }
-        },
-        (error) => {
-          hilog.error(DOMAIN, TAG, '连接失败: %{public}s', error);
-          prompt.showToast({
-            message: `连接失败: ${error}`,
-            duration: 3000
-          });
-        }
-      );
+      hilog.info(DOMAIN, TAG, '应用级连接已建立');
+      
+      // 如果有远程设备ID，打开远程屏幕
+      if (this.remoteDeviceId) {
+        this.openRemoteScreen();
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, '连接异常: %{public}s', JSON.stringify(error));
-      prompt.showToast({
+      promptAction.showToast({
         message: '连接异常，请检查网络',
         duration: 3000
       });
     }
   }
   openRemoteScreen(): void {
-    if (this.remoteDeviceId && this.remoteDevicePassword) {
-      this.remoteControlService.openRemoteScreen(
-        this.remoteDeviceId,
-        this.remoteDevicePassword
-      );
-    } else {
-      prompt.showToast({
-        message: '请输入设备ID和密码',
+    // 1. 检查设备ID格式（只能包含字母和数字）
+    const deviceIdRegex = /^[a-zA-Z0-9]+$/;
+    if (!deviceIdRegex.test(this.remoteDeviceId)) {
+      promptAction.showToast({
+        message: '设备ID只能包含字母和数字',
+        duration: 3000
+      });
+      return;
+    }
+    
+    // 2. 检查服务器连接状态
+    if (this.connectionState !== AppState.CONNECTED) {
+      promptAction.showToast({
+        message: '请先连接服务器',
+        duration: 3000
+      });
+      return;
+    }
+    
+    // 3. 检查密码是否为空
+    if (!this.remoteDevicePassword) {
+      promptAction.showToast({
+        message: '请输入密码',
         duration: 2000
       });
+      return;
     }
+    
+    // 4. 发送连接请求
+    this.remoteControlService.openRemoteScreen(
+      this.remoteDeviceId,
+      this.remoteDevicePassword
+    );
   }
   handleScreenImage(image: ScreenImage): void {
     // 处理屏幕图像数据
@@ -119,7 +137,7 @@ struct Control {
   handleFileDrop(): void {
     console.log('File drop functionality is not supported in ArkTS drag events');
     // 可以在这里添加其他文件选择方式，如文件选择器
-    prompt.showToast({
+    promptAction.showToast({
       message: '文件拖拽功能暂不支持，请使用文件选择器上传',
       duration: 3000
     });
@@ -129,10 +147,14 @@ struct Control {
     for (const file of files) {
       try {
         // 显示上传进度通知
-        prompt.showToast({
-          message: `正在上传: ${file.name}`,
-          duration: 1500
-        });
+        try {
+          promptAction.showToast({
+            message: `正在上传: ${file.name}`,
+            duration: 1500
+          });
+        } catch (toastError) {
+          hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
+        }
 
         // 将UploadableFile转换为UploadFile
         const uploadFile: UploadFile = {
@@ -141,28 +163,44 @@ struct Control {
         };
 
         // 调用FileService进行上传
-        await this.fileService.uploadFile(
-          uploadFile,
-          (progress: number) => {
-            // 更新进度通知
-            prompt.showToast({
-              message: `${file.name}: ${Math.round(progress * 100)}%`,
-              duration: 1000
-            });
-          }
-        );
+        try {
+          await this.fileService.uploadFile(
+            uploadFile,
+            (progress: number) => {
+              // 更新进度通知
+              try {
+                promptAction.showToast({
+                  message: `${file.name}: ${Math.round(progress * 100)}%`,
+                  duration: 1000
+                });
+              } catch (toastError) {
+                hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
+              }
+            }
+          );
 
-        // 上传完成通知
-        prompt.showToast({
-          message: `${file.name} 上传成功`,
-          duration: 2000
-        });
+          // 上传完成通知
+          try {
+            promptAction.showToast({
+              message: `${file.name} 上传成功`,
+              duration: 2000
+            });
+          } catch (toastError) {
+            hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
+          }
+        } catch (uploadError) {
+          hilog.error(DOMAIN, TAG, '文件上传失败: %{public}s', JSON.stringify(uploadError));
+          try {
+            promptAction.showToast({ 
+              message: `${file.name} 上传失败`,
+              duration: 3000 
+            });
+          } catch (toastError) {
+            hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
+          }
+        }
       } catch (error) {
-        hilog.error(DOMAIN, TAG, '文件上传失败: %{public}s', JSON.stringify(error));
-        prompt.showToast({
-          message: `${file.name} 上传失败`,
-          duration: 3000
-        });
+        hilog.error(DOMAIN, TAG, '上传处理失败: %{public}s', JSON.stringify(error));
       }
     }
   }
@@ -175,6 +213,40 @@ struct Control {
   }
   toggleToolbar(): void {
     this.isToolbarVisible = !this.isToolbarVisible;
+  }
+  handleTouchStart(event: GestureEvent): void {
+    // 触摸开始，记录初始位置
+    this.lastTouchX = event.offsetX;
+    this.lastTouchY = event.offsetY;
+  }
+
+  handleTouchMove(event: GestureEvent): void {
+    // 触摸移动，发送鼠标移动命令
+    const deltaX = event.offsetX - this.lastTouchX;
+    const deltaY = event.offsetY - this.lastTouchY;
+    
+    // 发送鼠标移动命令
+    this.remoteControlService.sendMouseControl(
+      event.offsetX,
+      event.offsetY,
+      0, // 0表示移动
+      undefined
+    );
+    
+    // 更新最后位置
+    this.lastTouchX = event.offsetX;
+    this.lastTouchY = event.offsetY;
+  }
+
+  handleTouchEnd(event: GestureEvent): void {
+    // 触摸结束，发送鼠标点击命令
+    // 发送鼠标点击命令（左键点击）
+    this.remoteControlService.sendMouseControl(
+      event.offsetX,
+      event.offsetY,
+      1, // 1表示左键点击
+      undefined
+    );
   }
 
   @Builder
@@ -210,6 +282,20 @@ struct Control {
         this.hideDragHint();
         this.handleFileDrop();
       })
+      .gesture(
+        GestureGroup(GestureMode.Exclusive,
+          PanGesture({ distance: 1 })
+            .onActionStart((event: GestureEvent) => {
+              this.handleTouchStart(event);
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              this.handleTouchMove(event);
+            })
+            .onActionEnd((event: GestureEvent) => {
+              this.handleTouchEnd(event);
+            })
+        )
+      )
     }
     .layoutWeight(1)  // 应用layoutWeight属性
   }
@@ -220,13 +306,12 @@ struct Control {
       // 控制按钮
       Button('断开连接')
         .onClick(() => {
-          this.remoteControlService.disconnect();
           router.back();
         })
       Button('设置')
         .onClick(() => {
-          router.pushUrl({ 
-            url: 'pages/Settings' 
+          router.pushUrl({
+            url: 'pages/Settings'
           });
         })
       

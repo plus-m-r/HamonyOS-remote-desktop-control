@@ -184,6 +184,7 @@ export interface ClipboardData {
   fileName?: string;
   filePid?: string;
   isFile?: number;
+  text?: string;
 }
 
 // 请求远程剪贴板
