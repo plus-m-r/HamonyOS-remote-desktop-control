@@ -97,16 +97,16 @@ export class CmdUtils {
    * 创建屏幕捕获数据命令
    */
   static createCaptureDataCmd(
-    imageData: string,
+    imageData: string | ArrayBuffer,
     width: number,
     height: number,
-    compressionMethod: CompressionMethod
+    compressionMethod: CompressionMethod | number
   ): ConcreteCmd {
     const data = new CmdData();
     data.imageData = imageData;
     data.width = width;
     data.height = height;
-    data.compressionMethod = compressionMethod;
+    data.compressionMethod = compressionMethod as number;
     return new ConcreteCmd(CmdType.Capture, data);
   }
 

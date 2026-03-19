@@ -8,7 +8,7 @@ export class CmdData {
   deviceCode: string = '';
   password: string = '';
   status: string = '';
-  imageData: string = '';
+  imageData: string | ArrayBuffer = '';
   width: number = 0;
   height: number = 0;
   x: number = 0;

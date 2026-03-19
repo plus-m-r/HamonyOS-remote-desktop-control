@@ -1188,11 +1188,11 @@ export class CmdCodec {
 
   /**
    * 解码 Capture 命令（二进制格式）
-   * 格式：width(4) + height(4) + compressionMethod(4) + imageData长度(4) + imageData
+   * 格式：id(4) + compressionMethod(1) + hasCompressionConfig(1) + [compressionConfig(10)] + payloadLength(4) + payload
    */
   private static decodeCaptureCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 16) {
+      if (dataBuffer.byteLength < 10) {
         console.error('CmdCodec: Capture data buffer too short');
         return undefined;
       }
@@ -1200,35 +1200,48 @@ export class CmdCodec {
       const view = new DataView(dataBuffer);
       let offset = 0;
 
-      // 读取 width
-      const width = view.getInt32(offset, false);
+      // 读取 id
+      const id = view.getInt32(offset, false);
       offset += 4;
 
-      // 读取 height
-      const height = view.getInt32(offset, false);
-      offset += 4;
+      // 读取 compressionMethod (enum ordinal)
+      const compressionMethodOrdinal = view.getUint8(offset);
+      offset += 1;
 
-      // 读取 compressionMethod
-      const compressionMethod = view.getInt32(offset, false);
-      offset += 4;
+      // 读取 hasCompressionConfig
+      const hasCompressionConfig = view.getUint8(offset) === 1;
+      offset += 1;
 
-      // 读取 imageData 长度
-      const imageDataLength = view.getUint32(offset, false);
+      // 如果有压缩配置，跳过它 (10字节)
+      if (hasCompressionConfig) {
+        if (dataBuffer.byteLength < offset + 10) {
+          console.error('CmdCodec: Capture compression config incomplete');
+          return undefined;
+        }
+        offset += 10;
+      }
+
+      // 读取 payload 长度
+      if (dataBuffer.byteLength < offset + 4) {
+        console.error('CmdCodec: Capture payload length incomplete');
+        return undefined;
+      }
+      const payloadLength = view.getInt32(offset, false);
       offset += 4;
 
       // 检查数据长度
-      if (dataBuffer.byteLength < offset + imageDataLength) {
-        console.error('CmdCodec: Capture data buffer incomplete');
+      if (dataBuffer.byteLength < offset + payloadLength) {
+        console.error(`CmdCodec: Capture data buffer incomplete - expected ${payloadLength}, got ${dataBuffer.byteLength - offset}`);
         return undefined;
       }
 
-      // 读取 imageData
-      const imageDataBytes = dataBuffer.slice(offset, offset + imageDataLength);
-      const decoder = util.TextDecoder.create('utf-8');
-      const imageData = decoder.decodeToString(new Uint8Array(imageDataBytes));
+      // 读取 payload (image data)
+      const imageData = dataBuffer.slice(offset, offset + payloadLength);
+
+      console.log(`CmdCodec: Decoded Capture command - id: ${id}, compressionMethod: ${compressionMethodOrdinal}, payloadSize: ${payloadLength}`);
 
       // 创建命令对象
-      return CmdUtils.createCaptureDataCmd(imageData, width, height, compressionMethod);
+      return CmdUtils.createCaptureDataCmd(imageData, 0, 0, compressionMethodOrdinal);
     } catch (error) {
       console.error('CmdCodec: Failed to decode Capture command', error);
       return undefined;
@@ -1771,12 +1784,12 @@ export class CmdCodec {
    * 创建屏幕捕获数据命令
    */
   static createCaptureDataCmd(
-    imageData: string,
+    imageData: string | ArrayBuffer,
     width: number,
     height: number,
     compressionMethod: number
   ): ConcreteCmd {
-    return CmdUtils.createCaptureDataCmd(imageData, width, height, compressionMethod as CompressionMethod);
+    return CmdUtils.createCaptureDataCmd(imageData, width, height, compressionMethod);
   }
 
   /**

@@ -324,20 +324,18 @@ export class RemoteControlService implements IRemoteControlService {
   private handleCaptureCommand(cmd: ConcreteCmd): void {
     try {
       const cmdData = cmd.toJSON() as CmdDataJSON;
-      const width = cmdData.width as number;
-      const height = cmdData.height as number;
       const imageData = cmdData.imageData as ArrayBuffer | string;
       
-      if (this.screenCallback && width && height) {
-        // 注意：这里需要根据实际的数据格式处理 imageData
-        // 假设 imageData 是 base64 编码的字符串或 ArrayBuffer
+      if (this.screenCallback && imageData) {
+        // imageData 已经是 ArrayBuffer 类型了
         const imageBuffer = imageData instanceof ArrayBuffer ? 
           imageData : new ArrayBuffer(0);
         
+        // 暂时使用固定的宽高，后续可以从压缩数据中解析
         this.screenCallback({
           data: imageBuffer,
-          width: width,
-          height: height,
+          width: 1920,
+          height: 1080,
           timestamp: Date.now()
         });
       }
