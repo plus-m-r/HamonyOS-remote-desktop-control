@@ -42,7 +42,10 @@ export class ConcreteCmd implements Cmd {
     if (data.deviceCode.length > 0) result['deviceCode'] = data.deviceCode;
     if (data.password.length > 0) result['password'] = data.password;
     if (data.status.length > 0) result['status'] = data.status;
-    if (data.imageData.length > 0) result['imageData'] = data.imageData;
+    const hasImageData = typeof data.imageData === 'string' 
+      ? data.imageData.length > 0 
+      : (data.imageData as ArrayBuffer).byteLength > 0;
+    if (hasImageData) result['imageData'] = data.imageData;
     if (data.width !== 0) result['width'] = data.width;
     if (data.height !== 0) result['height'] = data.height;
     if (data.x !== 0) result['x'] = data.x;
