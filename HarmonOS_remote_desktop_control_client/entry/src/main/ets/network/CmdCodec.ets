@@ -581,22 +581,31 @@ export class CmdCodec {
 
   /**
    * 编码鼠标控制命令
-   * 格式：deviceCode长度(4) + deviceCode + x(8) + y(8) + action(4) + wheelDelta(8, 可选)
+   * 格式：x(2) + y(2) + info(4) + [rotations(4)]
    */
   private static encodeMouseControlCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    const deviceCode = cmdData.deviceCode as string || '';
     const x = cmdData.x as number || 0;
     const y = cmdData.y as number || 0;
-    const action = cmdData.action as number || 1;
+    const action = cmdData.action as number || 0;
     const wheelDelta = cmdData.wheelDelta as number || 0;
-    const hasWheelDelta = cmdData.wheelDelta !== undefined;
     
-    // 将deviceCode转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
-    const deviceCodeBytes = encoder.encode(deviceCode);
+    // 计算info值
+    let info = 0;
+    const isWheel = wheelDelta !== undefined && wheelDelta !== 0;
     
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + x(8) + y(8) + action(4) + wheelDelta(8, 可选)
-    const dataLength = 4 + deviceCodeBytes.byteLength + 8 + 8 + 4 + (hasWheelDelta ? 8 : 0);
+    if (isWheel) {
+      info = 1 << 5; // WHEEL flag
+    } else {
+      // 简单映射：action=0表示移动，action=1表示按下BUTTON1
+      if (action === 1) {
+        info = (1 << 2) | 1; // BUTTON1 | PRESSED
+      } else if (action === 2) {
+        info = (1 << 2) | (1 << 1); // BUTTON1 | RELEASED
+      }
+    }
+    
+    // 计算数据长度
+    const dataLength = isWheel ? 12 : 8;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -616,30 +625,21 @@ export class CmdCodec {
     view.setUint32(offset, dataLength, false);
     offset += 4;
     
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
+    // x坐标 (short)
+    view.setInt16(offset, x, false);
+    offset += 2;
+    
+    // y坐标 (short)
+    view.setInt16(offset, y, false);
+    offset += 2;
+    
+    // info
+    view.setInt32(offset, info, false);
     offset += 4;
     
-    // deviceCode字节
-    const dataView = new Uint8Array(buffer, offset);
-    dataView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
-    
-    // x坐标 (double)
-    view.setFloat64(offset, x, false);
-    offset += 8;
-    
-    // y坐标 (double)
-    view.setFloat64(offset, y, false);
-    offset += 8;
-    
-    // 鼠标动作
-    view.setInt32(offset, action, false);
-    offset += 4;
-    
-    // wheelDelta (可选)
-    if (hasWheelDelta) {
-      view.setFloat64(offset, wheelDelta, false);
+    // rotations (wheelDelta) - 可选
+    if (isWheel) {
+      view.setInt32(offset, wheelDelta, false);
     }
     
     return buffer;
@@ -647,19 +647,20 @@ export class CmdCodec {
 
   /**
    * 编码键盘控制命令
-   * 格式：deviceCode长度(4) + deviceCode + keyCode(4) + pressed(1)
+   * 格式：info(4) + keyCode(4) + keyChar(2)
    */
   private static encodeKeyControlCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    const deviceCode = cmdData.deviceCode as string || '';
     const keyCode = cmdData.keyCode as number || 0;
-    const pressed = cmdData.pressed as boolean ? 1 : 0;
+    const pressed = cmdData.pressed as boolean ? 1 : 2; // 1=PRESSED, 2=RELEASED
     
-    // 将deviceCode转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
-    const deviceCodeBytes = encoder.encode(deviceCode);
+    // 计算info值
+    const info = pressed;
     
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + keyCode(4) + pressed(1)
-    const dataLength = 4 + deviceCodeBytes.byteLength + 4 + 1;
+    // keyChar - 暂时使用空格字符
+    const keyChar = ' ';
+    
+    // 数据长度总是10
+    const dataLength = 10;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -679,21 +680,22 @@ export class CmdCodec {
     view.setUint32(offset, dataLength, false);
     offset += 4;
     
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
+    // info
+    view.setInt32(offset, info, false);
     offset += 4;
-    
-    // deviceCode字节
-    const dataView = new Uint8Array(buffer, offset);
-    dataView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
     
     // keyCode
     view.setInt32(offset, keyCode, false);
     offset += 4;
     
-    // pressed (boolean as byte)
-    view.setUint8(offset, pressed);
+    // keyChar (char作为UTF-16编码)
+    const encoder = new util.TextEncoder();
+    const keyCharBytes = encoder.encode(keyChar);
+    if (keyCharBytes.byteLength >= 2) {
+      view.setUint16(offset, (keyCharBytes[0] << 8) | keyCharBytes[1], false);
+    } else if (keyCharBytes.byteLength === 1) {
+      view.setUint16(offset, keyCharBytes[0], false);
+    }
     
     return buffer;
   }
@@ -743,19 +745,19 @@ export class CmdCodec {
 
   /**
    * 编码文本剪贴板命令
-   * 格式：deviceCode长度(4) + deviceCode + text长度(4) + text
+   * 格式：payload长度(4) + payload + controlType长度(4) + controlType
    */
   private static encodeClipboardTextCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    const deviceCode = cmdData.deviceCode as string || '';
     const text = cmdData.text as string || '';
+    const controlType = cmdData.controlType as string || '';
     
-    // 将deviceCode和text转换为UTF-8字节数组
+    // 将payload和controlType转换为UTF-8字节数组
     const encoder = new util.TextEncoder();
-    const deviceCodeBytes = encoder.encode(deviceCode);
-    const textBytes = encoder.encode(text);
+    const payloadBytes = encoder.encode(text);
+    const controlTypeBytes = encoder.encode(controlType);
     
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + text长度(4) + text字节数
-    const dataLength = 4 + deviceCodeBytes.byteLength + 4 + textBytes.byteLength;
+    // 计算数据长度：payload长度(4) + payload字节数 + controlType长度(4) + controlType字节数
+    const dataLength = 4 + payloadBytes.byteLength + 4 + controlTypeBytes.byteLength;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -775,43 +777,41 @@ export class CmdCodec {
     view.setUint32(offset, dataLength, false);
     offset += 4;
     
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
+    // payload长度
+    view.setUint32(offset, payloadBytes.byteLength, false);
     offset += 4;
     
-    // deviceCode字节
-    const dataView = new Uint8Array(buffer, offset);
-    dataView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
+    // payload字节
+    const payloadView = new Uint8Array(buffer, offset);
+    payloadView.set(payloadBytes);
+    offset += payloadBytes.byteLength;
     
-    // text长度
-    view.setUint32(offset, textBytes.byteLength, false);
+    // controlType长度
+    view.setUint32(offset, controlTypeBytes.byteLength, false);
     offset += 4;
     
-    // text字节
-    const textView = new Uint8Array(buffer, offset);
-    textView.set(textBytes);
+    // controlType字节
+    const controlTypeView = new Uint8Array(buffer, offset);
+    controlTypeView.set(controlTypeBytes);
     
     return buffer;
   }
 
   /**
    * 编码文件传输剪贴板命令
-   * 格式：deviceCode长度(4) + deviceCode + fileInfoId长度(4) + fileInfoId + fileName长度(4) + fileName
+   * 格式：deviceCode长度(4) + deviceCode + controlType长度(4) + controlType
    */
   private static encodeClipboardTransferCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
-    const fileInfoId = cmdData.fileInfoId as string || '';
-    const fileName = cmdData.fileName as string || '';
+    const controlType = cmdData.controlType as string || '';
     
     // 将字符串转换为UTF-8字节数组
     const encoder = new util.TextEncoder();
     const deviceCodeBytes = encoder.encode(deviceCode);
-    const fileInfoIdBytes = encoder.encode(fileInfoId);
-    const fileNameBytes = encoder.encode(fileName);
+    const controlTypeBytes = encoder.encode(controlType);
     
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + fileInfoId长度(4) + fileInfoId字节数 + fileName长度(4) + fileName字节数
-    const dataLength = 4 + deviceCodeBytes.byteLength + 4 + fileInfoIdBytes.byteLength + 4 + fileNameBytes.byteLength;
+    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + controlType长度(4) + controlType字节数
+    const dataLength = 4 + deviceCodeBytes.byteLength + 4 + controlTypeBytes.byteLength;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -840,22 +840,13 @@ export class CmdCodec {
     dataView.set(deviceCodeBytes);
     offset += deviceCodeBytes.byteLength;
     
-    // fileInfoId长度
-    view.setUint32(offset, fileInfoIdBytes.byteLength, false);
+    // controlType长度
+    view.setUint32(offset, controlTypeBytes.byteLength, false);
     offset += 4;
     
-    // fileInfoId字节
-    const fileInfoIdView = new Uint8Array(buffer, offset);
-    fileInfoIdView.set(fileInfoIdBytes);
-    offset += fileInfoIdBytes.byteLength;
-    
-    // fileName长度
-    view.setUint32(offset, fileNameBytes.byteLength, false);
-    offset += 4;
-    
-    // fileName字节
-    const fileNameView = new Uint8Array(buffer, offset);
-    fileNameView.set(fileNameBytes);
+    // controlType字节
+    const controlTypeView = new Uint8Array(buffer, offset);
+    controlTypeView.set(controlTypeBytes);
     
     return buffer;
   }
@@ -1110,7 +1101,7 @@ export class CmdCodec {
 
   /**
    * 解码 ResOpen 命令（二进制格式）
-   * 格式：status(1)
+   * 格式：code(1)
    */
   private static decodeResOpenCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
@@ -1120,18 +1111,21 @@ export class CmdCodec {
       }
 
       const view = new DataView(dataBuffer);
-      const statusValue = view.getUint8(0);
+      const code = view.getUint8(0);
+      
+      console.log(`CmdCodec: Decoded ResOpen command - code: ${code}`);
       
       // 将数字转换为OpenStatus类型
+      // 注意：Java服务器端定义：OK=0, OFFLINE=5, CONTROL=4
       let status: OpenStatus = 'OK';
-      switch (statusValue) {
+      switch (code) {
         case 0:
           status = 'OK';
           break;
-        case 1:
+        case 5:
           status = 'OFFLINE';
           break;
-        case 2:
+        case 4:
           status = 'CONTROL';
           break;
       }
@@ -1146,7 +1140,7 @@ export class CmdCodec {
 
   /**
    * 解码 ResCapture 命令（二进制格式）
-   * 格式：status(1) + screenNum(4)
+   * 格式：code(1) + screenNum(4)
    */
   private static decodeResCaptureCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
@@ -1156,27 +1150,38 @@ export class CmdCodec {
       }
 
       const view = new DataView(dataBuffer);
-      const statusValue = view.getUint8(0);
+      let offset = 0;
+      
+      // 读取 code
+      const code = view.getUint8(offset);
+      offset += 1;
+      
+      // 读取 screenNum
+      const screenNum = view.getInt32(offset, false);
       
       // 将数字转换为CaptureStatus类型
       let status: CaptureStatus = 'OK';
-      switch (statusValue) {
-        case 0:
+      switch (code) {
+        case 0: // START
           status = 'OK';
           break;
-        case 1:
+        case 4: // OFFLINE
           status = 'OFFLINE';
           break;
-        case 2:
+        case 6: // PWDERROR
           status = 'PWDERROR';
           break;
-        case 3:
+        case 5: // CONTROL
           status = 'CONTROL';
           break;
-        case 4:
+        case 1: // STOP
+        case 2: // STOP_BYCONTROLLED
+        case 3: // STOP_CHANNELINACTIVE
           status = 'STOP';
           break;
       }
+
+      console.log(`CmdCodec: Decoded ResCapture command - code: ${code}, screenNum: ${screenNum}, status: ${status}`);
 
       // 创建命令对象
       return CmdUtils.createCaptureResponseCmd(status);
@@ -1307,11 +1312,11 @@ export class CmdCodec {
 
   /**
    * 解码 KeyControl 命令（二进制格式）
-   * 格式：deviceCode长度(4) + deviceCode + keyCode(4) + pressed(1)
+   * 格式：info(4) + keyCode(4) + keyChar(2)
    */
   private static decodeKeyControlCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 9) {
+      if (dataBuffer.byteLength < 10) {
         console.error('CmdCodec: KeyControl data buffer too short');
         return undefined;
       }
@@ -1319,25 +1324,23 @@ export class CmdCodec {
       const view = new DataView(dataBuffer);
       let offset = 0;
 
-      // 读取 deviceCode 长度
-      const deviceCodeLength = view.getUint32(offset, false);
+      // 读取 info
+      const info = view.getInt32(offset, false);
       offset += 4;
-
-      // 读取 deviceCode
-      const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
-      const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
-      offset += deviceCodeLength;
 
       // 读取 keyCode
       const keyCode = view.getInt32(offset, false);
       offset += 4;
 
-      // 读取 pressed
-      const pressed = view.getUint8(offset) === 1;
+      // 读取 keyChar
+      const keyCharCode = view.getUint16(offset, false);
+      const keyChar = String.fromCharCode(keyCharCode);
 
-      // 创建命令对象
-      return CmdUtils.createKeyControlCmd(deviceCode, keyCode, pressed);
+      // 解析pressed
+      const pressed = (info & 1) === 1;
+
+      // 创建命令对象（使用空的deviceCode，因为Java协议中没有这个字段
+      return CmdUtils.createKeyControlCmd('', keyCode, pressed);
     } catch (error) {
       console.error('CmdCodec: Failed to decode KeyControl command', error);
       return undefined;
@@ -1346,11 +1349,11 @@ export class CmdCodec {
 
   /**
    * 解码 MouseControl 命令（二进制格式）
-   * 格式：deviceCode长度(4) + deviceCode + x(8) + y(8) + action(4) + wheelDelta(8, 可选)
+   * 格式：x(2) + y(2) + info(4) + [rotations(4)]
    */
   private static decodeMouseControlCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 24) {
+      if (dataBuffer.byteLength < 8) {
         console.error('CmdCodec: MouseControl data buffer too short');
         return undefined;
       }
@@ -1358,36 +1361,37 @@ export class CmdCodec {
       const view = new DataView(dataBuffer);
       let offset = 0;
 
-      // 读取 deviceCode 长度
-      const deviceCodeLength = view.getUint32(offset, false);
+      // 读取 x (short)
+      const x = view.getInt16(offset, false);
+      offset += 2;
+
+      // 读取 y (short)
+      const y = view.getInt16(offset, false);
+      offset += 2;
+
+      // 读取 info
+      const info = view.getInt32(offset, false);
       offset += 4;
 
-      // 读取 deviceCode
-      const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
-      const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
-      offset += deviceCodeLength;
-
-      // 读取 x
-      const x = view.getFloat64(offset, false);
-      offset += 8;
-
-      // 读取 y
-      const y = view.getFloat64(offset, false);
-      offset += 8;
-
-      // 读取 action
-      const action = view.getInt32(offset, false);
-      offset += 4;
-
-      // 读取 wheelDelta（可选）
+      // 检查是否是wheel事件
+      const isWheel = (info & (1 << 5)) === (1 << 5);
       let wheelDelta: number | undefined = undefined;
-      if (dataBuffer.byteLength >= offset + 8) {
-        wheelDelta = view.getFloat64(offset, false);
+      if (isWheel && dataBuffer.byteLength >= offset + 4) {
+        wheelDelta = view.getInt32(offset, false);
       }
 
-      // 创建命令对象
-      return CmdUtils.createMouseControlCmd(deviceCode, x, y, action, wheelDelta);
+      // 简单解析action映射
+      let action = 0;
+      if (!isWheel) {
+        const isPressed = (info & 1) === 1;
+        const isButton1 = (info & (1 << 2)) === (1 << 2);
+        if (isButton1) {
+          action = isPressed ? 1 : 2;
+        }
+      }
+
+      // 创建命令对象（使用空的deviceCode，因为Java协议中没有这个字段
+      return CmdUtils.createMouseControlCmd('', x, y, action, wheelDelta);
     } catch (error) {
       console.error('CmdCodec: Failed to decode MouseControl command', error);
       return undefined;
@@ -1396,7 +1400,7 @@ export class CmdCodec {
 
   /**
    * 解码 ClipboardText 命令（二进制格式）
-   * 格式：deviceCode长度(4) + deviceCode + text长度(4) + text
+   * 格式：payload长度(4) + payload + controlType长度(4) + controlType
    */
   private static decodeClipboardTextCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
@@ -1408,32 +1412,34 @@ export class CmdCodec {
       const view = new DataView(dataBuffer);
       let offset = 0;
 
-      // 读取 deviceCode 长度
-      const deviceCodeLength = view.getUint32(offset, false);
+      // 读取 payload 长度
+      const payloadLength = view.getUint32(offset, false);
       offset += 4;
 
-      // 读取 deviceCode
-      const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
+      // 读取 payload
+      const payloadBytes = dataBuffer.slice(offset, offset + payloadLength);
       const decoder = util.TextDecoder.create('utf-8');
-      const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
-      offset += deviceCodeLength;
+      const payload = decoder.decodeToString(new Uint8Array(payloadBytes));
+      offset += payloadLength;
 
-      // 读取 text 长度
-      const textLength = view.getUint32(offset, false);
+      // 读取 controlType 长度
+      const controlTypeLength = view.getUint32(offset, false);
       offset += 4;
 
       // 检查数据长度
-      if (dataBuffer.byteLength < offset + textLength) {
-        console.error('CmdCodec: ClipboardText data buffer incomplete');
+      if (dataBuffer.byteLength < offset + controlTypeLength) {
+        console.error('CmdCodec: ClipboardText controlType buffer incomplete');
         return undefined;
       }
 
-      // 读取 text
-      const textBytes = dataBuffer.slice(offset, offset + textLength);
-      const text = decoder.decodeToString(new Uint8Array(textBytes));
+      // 读取 controlType
+      const controlTypeBytes = dataBuffer.slice(offset, offset + controlTypeLength);
+      const controlType = decoder.decodeToString(new Uint8Array(controlTypeBytes));
 
-      // 创建命令对象
-      return CmdUtils.createClipboardTextCmd(deviceCode, text);
+      console.log(`CmdCodec: Decoded ClipboardText command - payload: ${payload}, controlType: ${controlType}`);
+
+      // 创建命令对象（使用空的deviceCode，因为Java协议中没有这个字段
+      return CmdUtils.createClipboardTextCmd('', payload);
     } catch (error) {
       console.error('CmdCodec: Failed to decode ClipboardText command', error);
       return undefined;
@@ -1442,11 +1448,11 @@ export class CmdCodec {
 
   /**
    * 解码 ClipboardTransfer 命令（二进制格式）
-   * 格式：deviceCode长度(4) + deviceCode + fileInfoId长度(4) + fileInfoId + fileName长度(4) + fileName
+   * 格式：deviceCode长度(4) + deviceCode + controlType长度(4) + controlType
    */
   private static decodeClipboardTransferCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 12) {
+      if (dataBuffer.byteLength < 8) {
         console.error('CmdCodec: ClipboardTransfer data buffer too short');
         return undefined;
       }
@@ -1464,31 +1470,24 @@ export class CmdCodec {
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
 
-      // 读取 fileInfoId 长度
-      const fileInfoIdLength = view.getUint32(offset, false);
-      offset += 4;
-
-      // 读取 fileInfoId
-      const fileInfoIdBytes = dataBuffer.slice(offset, offset + fileInfoIdLength);
-      const fileInfoId = decoder.decodeToString(new Uint8Array(fileInfoIdBytes));
-      offset += fileInfoIdLength;
-
-      // 读取 fileName 长度
-      const fileNameLength = view.getUint32(offset, false);
+      // 读取 controlType 长度
+      const controlTypeLength = view.getUint32(offset, false);
       offset += 4;
 
       // 检查数据长度
-      if (dataBuffer.byteLength < offset + fileNameLength) {
-        console.error('CmdCodec: ClipboardTransfer data buffer incomplete');
+      if (dataBuffer.byteLength < offset + controlTypeLength) {
+        console.error('CmdCodec: ClipboardTransfer controlType buffer incomplete');
         return undefined;
       }
 
-      // 读取 fileName
-      const fileNameBytes = dataBuffer.slice(offset, offset + fileNameLength);
-      const fileName = decoder.decodeToString(new Uint8Array(fileNameBytes));
+      // 读取 controlType
+      const controlTypeBytes = dataBuffer.slice(offset, offset + controlTypeLength);
+      const controlType = decoder.decodeToString(new Uint8Array(controlTypeBytes));
+
+      console.log(`CmdCodec: Decoded ClipboardTransfer command - deviceCode: ${deviceCode}, controlType: ${controlType}`);
 
       // 创建命令对象
-      return CmdUtils.createClipboardTransferCmd(deviceCode, fileInfoId, fileName);
+      return CmdUtils.createClipboardTransferCmd(deviceCode, '', '');
     } catch (error) {
       console.error('CmdCodec: Failed to decode ClipboardTransfer command', error);
       return undefined;
