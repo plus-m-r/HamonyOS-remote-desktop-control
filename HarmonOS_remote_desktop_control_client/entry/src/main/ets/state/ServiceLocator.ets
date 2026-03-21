@@ -71,8 +71,7 @@ export class ServiceLocator {
       SERVER_CONFIG.tcpPort,
       (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
         // 屏幕数据回调 - 更新全局状态
-        const image = new ScreenImage(data, width, height, timestamp);
-        AppStateManager.setScreenImage(image);
+        AppStateManager.setScreenData(data, width, height, timestamp);
       }
     );
 
