@@ -45,6 +45,44 @@ struct Control {
   private remoteControlService = ServiceProvider.remoteControlService;
   private fileService = ServiceProvider.fileService;
   private clipboardService = ServiceProvider.clipboardService;
+
+  private showToast(message: string, duration: number = 2000): void {
+    try {
+      const uiContext = this.getUIContext();
+      const promptActionInstance = uiContext.getPromptAction();
+      promptActionInstance.showToast({
+        message: message,
+        duration: duration
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '显示Toast失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private routerBack(): void {
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      routerInstance.back();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '返回失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private routerPushUrl(url: string): void {
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      routerInstance.pushUrl({
+        url: url
+      }).catch((error: Error) => {
+        hilog.error(DOMAIN, TAG, '跳转失败: %{public}s', JSON.stringify(error));
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '跳转失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
   aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, 'Control页面开始加载');
 
@@ -82,10 +120,10 @@ struct Control {
         }, 500);
       }
     });
-
     // 设置屏幕回调
-    this.remoteControlService.setScreenCallback((image: ScreenImage) => {
+    this.remoteControlService.setScreenCallback((data: ArrayBuffer, width: number, height: number, timestamp: number) => {
       hilog.info(DOMAIN, TAG, '收到屏幕回调');
+      const image = new ScreenImage(data, width, height, timestamp);
       this.handleScreenImage(image);
     });
 
@@ -110,20 +148,14 @@ struct Control {
     const deviceIdRegex = /^[a-zA-Z0-9]+$/;
     if (!deviceIdRegex.test(this.remoteDeviceId)) {
       hilog.warn(DOMAIN, TAG, '设备ID格式错误');
-      promptAction.showToast({
-        message: '设备ID只能包含字母和数字',
-        duration: 3000
-      });
+      this.showToast('设备ID只能包含字母和数字', 3000);
       return;
     }
     
     // 2. 检查密码是否为空
     if (!this.remoteDevicePassword) {
       hilog.warn(DOMAIN, TAG, '密码为空');
-      promptAction.showToast({
-        message: '请输入密码',
-        duration: 2000
-      });
+      this.showToast('请输入密码', 2000);
       return;
     }
     
@@ -173,24 +205,14 @@ struct Control {
   handleFileDrop(): void {
     console.log('File drop functionality is not supported in ArkTS drag events');
     // 可以在这里添加其他文件选择方式，如文件选择器
-    promptAction.showToast({
-      message: '文件拖拽功能暂不支持，请使用文件选择器上传',
-      duration: 3000
-    });
+    this.showToast('文件拖拽功能暂不支持，请使用文件选择器上传', 3000);
   }
 
   async uploadFiles(files: UploadableFile[]) {
     for (const file of files) {
       try {
         // 显示上传进度通知
-        try {
-          promptAction.showToast({
-            message: `正在上传: ${file.name}`,
-            duration: 1500
-          });
-        } catch (toastError) {
-          hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
-        }
+        this.showToast(`正在上传: ${file.name}`, 1500);
 
         // 将UploadableFile转换为UploadFile
         const uploadFile: UploadFile = {
@@ -204,36 +226,15 @@ struct Control {
             uploadFile,
             (progress: number) => {
               // 更新进度通知
-              try {
-                promptAction.showToast({
-                  message: `${file.name}: ${Math.round(progress * 100)}%`,
-                  duration: 1000
-                });
-              } catch (toastError) {
-                hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
-              }
+              this.showToast(`${file.name}: ${Math.round(progress * 100)}%`, 1000);
             }
           );
 
           // 上传完成通知
-          try {
-            promptAction.showToast({
-              message: `${file.name} 上传成功`,
-              duration: 2000
-            });
-          } catch (toastError) {
-            hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
-          }
+          this.showToast(`${file.name} 上传成功`, 2000);
         } catch (uploadError) {
           hilog.error(DOMAIN, TAG, '文件上传失败: %{public}s', JSON.stringify(uploadError));
-          try {
-            promptAction.showToast({ 
-              message: `${file.name} 上传失败`,
-              duration: 3000 
-            });
-          } catch (toastError) {
-            hilog.error(DOMAIN, TAG, '显示通知失败: %{public}s', JSON.stringify(toastError));
-          }
+          this.showToast(`${file.name} 上传失败`, 3000);
         }
       } catch (error) {
         hilog.error(DOMAIN, TAG, '上传处理失败: %{public}s', JSON.stringify(error));
@@ -351,13 +352,11 @@ struct Control {
       // 控制按钮
       Button('断开连接')
         .onClick(() => {
-          router.back();
+          this.routerBack();
         })
       Button('设置')
         .onClick(() => {
-          router.pushUrl({
-            url: 'pages/Settings'
-          });
+          this.routerPushUrl('pages/Settings');
         })
       
       Button('最小化工具栏')

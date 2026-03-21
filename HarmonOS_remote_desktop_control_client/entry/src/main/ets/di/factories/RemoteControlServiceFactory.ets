@@ -1,6 +1,5 @@
 // entry/src/main/ets/di/factories/RemoteControlServiceFactory.ts
 import { RemoteControlService } from '../../services/remote/RemoteControlService';
-import { ScreenImage } from '../../models/DeviceInfo';
 import { SERVER_CONFIG } from '../../config/config';
 import { AppStateManager } from '../../state/AppStateManager';
 
@@ -14,11 +13,11 @@ export class RemoteControlServiceFactory {
    * @param screenCallback 屏幕回调函数
    * @returns RemoteControlService实例
    */
-  static create(screenCallback?: (image: ScreenImage) => void): RemoteControlService {
+  static create(screenCallback?: (data: ArrayBuffer, width: number, height: number, timestamp: number) => void): RemoteControlService {
     // 如果没有提供屏幕回调，使用默认回调
-    const defaultCallback = screenCallback || ((image: ScreenImage) => {
+    const defaultCallback = screenCallback || ((data: ArrayBuffer, width: number, height: number, timestamp: number) => {
       // 更新全局状态
-      AppStateManager.setScreenImage(image);
+      AppStateManager.setScreenData(data, width, height, timestamp);
     });
 
     // 创建服务实例

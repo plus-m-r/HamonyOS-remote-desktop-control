@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
+import { ContextManager } from '../utils/ContextManager';
 
 const DOMAIN = 0x0000;
 
@@ -14,6 +15,9 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    
+    // 初始化 ContextManager
+    ContextManager.getInstance().setContext(this.context);
     
     // 初始化服务并建立连接
     this.initializeServices();

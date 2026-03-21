@@ -42,11 +42,18 @@ export interface RemoteControlEvent {
 }
 
 // 屏幕图像数据
-export interface ScreenImage {
+export class ScreenImage {
   data: ArrayBuffer;
   width: number;
   height: number;
   timestamp: number;
+
+  constructor(data: ArrayBuffer, width: number, height: number, timestamp: number) {
+    this.data = data;
+    this.width = width;
+    this.height = height;
+    this.timestamp = timestamp;
+  }
 }
 
 // 连接状态

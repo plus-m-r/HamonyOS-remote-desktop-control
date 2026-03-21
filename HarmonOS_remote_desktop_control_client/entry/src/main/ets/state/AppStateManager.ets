@@ -1,5 +1,5 @@
 // entry/src/main/ets/state/AppStateManager.ets
-import { DeviceInfo, ScreenImage } from '../models/DeviceInfo';
+import { DeviceInfo } from '../models/DeviceInfo';
 import { SyncSettings } from '../pages/Settings';
 
 /**
@@ -15,9 +15,11 @@ export interface StateKeys {
   USER_ID: string;
   USER_PASSWORD: string;
   DEVICE_ID_INPUT: string;
-  SCREEN_IMAGE: string;
-  ACTIVE_NAV_ITEM: string;
+  SCREEN_DATA: string;
   SCREEN_WIDTH: string;
+  SCREEN_HEIGHT: string;
+  SCREEN_TIMESTAMP: string;
+  ACTIVE_NAV_ITEM: string;
   IS_LOADING: string;
   UPLOAD_PROGRESS: string;
   DOWNLOAD_PROGRESS: string;
@@ -37,9 +39,11 @@ export class StateKeysImpl implements StateKeys {
   USER_ID: string = 'userId';
   USER_PASSWORD: string = 'userPassword';
   DEVICE_ID_INPUT: string = 'deviceIdInput';
-  SCREEN_IMAGE: string = 'screenImage';
-  ACTIVE_NAV_ITEM: string = 'activeNavItem';
+  SCREEN_DATA: string = 'screenData';
   SCREEN_WIDTH: string = 'screenWidth';
+  SCREEN_HEIGHT: string = 'screenHeight';
+  SCREEN_TIMESTAMP: string = 'screenTimestamp';
+  ACTIVE_NAV_ITEM: string = 'activeNavItem';
   IS_LOADING: string = 'isLoading';
   UPLOAD_PROGRESS: string = 'uploadProgress';
   DOWNLOAD_PROGRESS: string = 'downloadProgress';
@@ -87,12 +91,14 @@ export class AppStateManager {
     AppStorage.setOrCreate<string>(STATE_KEYS.USER_PASSWORD, '');
     AppStorage.setOrCreate<string>(STATE_KEYS.DEVICE_ID_INPUT, '');
     
-    // 屏幕数据
-    AppStorage.setOrCreate<ScreenImage | null>(STATE_KEYS.SCREEN_IMAGE, null);
+    // 屏幕数据 - 单独存储每个字段，避免结构类型问题
+    AppStorage.setOrCreate<ArrayBuffer | null>(STATE_KEYS.SCREEN_DATA, null);
+    AppStorage.setOrCreate<number>(STATE_KEYS.SCREEN_WIDTH, 0);
+    AppStorage.setOrCreate<number>(STATE_KEYS.SCREEN_HEIGHT, 0);
+    AppStorage.setOrCreate<number>(STATE_KEYS.SCREEN_TIMESTAMP, 0);
     
     // UI 状态
     AppStorage.setOrCreate<string>(STATE_KEYS.ACTIVE_NAV_ITEM, 'home');
-    AppStorage.setOrCreate<number>(STATE_KEYS.SCREEN_WIDTH, 360);
     AppStorage.setOrCreate<boolean>(STATE_KEYS.IS_LOADING, false);
     
     // 文件传输
@@ -178,12 +184,27 @@ export class AppStateManager {
 
   // ============ 屏幕数据管理 ============
 
-  static setScreenImage(image: ScreenImage | null): void {
-    AppStorage.set(STATE_KEYS.SCREEN_IMAGE, image);
+  static setScreenData(data: ArrayBuffer, width: number, height: number, timestamp: number): void {
+    AppStorage.set(STATE_KEYS.SCREEN_DATA, data);
+    AppStorage.set(STATE_KEYS.SCREEN_WIDTH, width);
+    AppStorage.set(STATE_KEYS.SCREEN_HEIGHT, height);
+    AppStorage.set(STATE_KEYS.SCREEN_TIMESTAMP, timestamp);
   }
 
-  static getScreenImage(): ScreenImage | null {
-    return AppStorage.get(STATE_KEYS.SCREEN_IMAGE) as ScreenImage | null;
+  static getScreenData(): ArrayBuffer | null {
+    return AppStorage.get(STATE_KEYS.SCREEN_DATA) as ArrayBuffer | null;
+  }
+
+  static getScreenWidth(): number {
+    return AppStorage.get(STATE_KEYS.SCREEN_WIDTH) as number;
+  }
+
+  static getScreenHeight(): number {
+    return AppStorage.get(STATE_KEYS.SCREEN_HEIGHT) as number;
+  }
+
+  static getScreenTimestamp(): number {
+    return AppStorage.get(STATE_KEYS.SCREEN_TIMESTAMP) as number;
   }
 
   // ============ UI 状态管理 ============
@@ -199,11 +220,6 @@ export class AppStateManager {
   static setScreenWidth(width: number): void {
     AppStorage.set(STATE_KEYS.SCREEN_WIDTH, width);
   }
-
-  static getScreenWidth(): number {
-    return AppStorage.get(STATE_KEYS.SCREEN_WIDTH) as number;
-  }
-
   static setLoading(loading: boolean): void {
     AppStorage.set(STATE_KEYS.IS_LOADING, loading);
   }

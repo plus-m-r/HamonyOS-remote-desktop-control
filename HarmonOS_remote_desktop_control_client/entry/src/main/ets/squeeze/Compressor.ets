@@ -3,7 +3,7 @@ import { CaptureTile } from './CaptureTile';
 import { Capture } from './Capture';
 import { TileCache, NullTileCache, RegularTileCache } from './TileCache';
 import { RunLengthEncoder, NullRunLengthEncoder, RegularRunLengthEncoder } from './RunLengthEncoder';
-import { Zipper, NullZipper, ZstdZipper } from './Zipper';
+import { Zipper, ZstdZipper } from './Zipper';
 import { XYWH, getXYWH } from './XYWH';
 
 export enum CompressionMethod {
@@ -14,12 +14,6 @@ export enum CompressionMethod {
 }
 
 export class Compressor {
-  private static readonly NULL_COMPRESSOR: Compressor = new Compressor(
-    CompressionMethod.NONE,
-    new NullRunLengthEncoder(),
-    new NullZipper()
-  );
-
   private static readonly ZSTD_COMPRESSOR: Compressor = new Compressor(
     CompressionMethod.ZSTD,
     new RegularRunLengthEncoder(),
@@ -40,10 +34,8 @@ export class Compressor {
     switch (method) {
       case CompressionMethod.ZSTD:
         return Compressor.ZSTD_COMPRESSOR;
-      case CompressionMethod.NONE:
-        return Compressor.NULL_COMPRESSOR;
       default:
-        throw new Error(`Unsupported compressor configuration [${method}]!`);
+        throw new Error(`Unsupported compressor configuration [${method}]! Only ZSTD is supported.`);
     }
   }
 

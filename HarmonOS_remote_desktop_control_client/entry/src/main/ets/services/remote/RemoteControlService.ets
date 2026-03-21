@@ -1,5 +1,5 @@
 
-import { RemoteControlEvent, ScreenImage, ConnectionState } from '../../models/DeviceInfo';
+import { RemoteControlEvent, ConnectionState } from '../../models/DeviceInfo';
 import { IRemoteControlService, DeviceValidationResult, DeviceCredentials } from '../interfaces/IService';
 import socket from '@ohos.net.socket';
 import { BusinessError } from '@ohos.base';
@@ -15,6 +15,10 @@ import {
   ClipboardCallback,
   ClipboardData
 } from '../../models/CmdProtocol';
+import { Compressor, CompressionMethod as SqueezeCompressionMethod } from '../../squeeze/Compressor';
+import { Capture } from '../../squeeze/Capture';
+import { MemByteBuffer } from '../../squeeze/MemByteBuffer';
+import { TileCache, NullTileCache } from '../../squeeze/TileCache';
 
 // 日志相关常量
 const DOMAIN: number = 0xFF00;
@@ -57,7 +61,7 @@ export class RemoteControlService implements IRemoteControlService {
   private host: string;
   private port: number;
   private socket: socket.TCPSocket | null = null;
-  private screenCallback: ((image: ScreenImage) => void) | null = null;
+  private screenCallback: ((data: ArrayBuffer, width: number, height: number, timestamp: number) => void) | null = null;
   private clientInfoCallback: ClientInfoCallback | null = null;
   private connectionCallback: ConnectionCallback | null = null;
   private clipboardCallback: ClipboardCallback | null = null;
@@ -76,11 +80,16 @@ export class RemoteControlService implements IRemoteControlService {
   private remoteControlEnabled: boolean = false;
   private validationCallback: ((result: DeviceValidationResult) => void) | null = null;
   private isValidating: boolean = false;
+  
+  private tileCache: TileCache = new NullTileCache();
+  private prevImageBuffer: Uint8Array | null = null;
+  private prevImageWidth: number = 0;
+  private prevImageHeight: number = 0;
 
   constructor(
     host: string, 
     port: number, 
-    screenCallback: (image: ScreenImage) => void,
+    screenCallback: (data: ArrayBuffer, width: number, height: number, timestamp: number) => void,
     clientInfoCallback?: ClientInfoCallback,
     connectionCallback?: ConnectionCallback,
     clipboardCallback?: ClipboardCallback,
@@ -98,7 +107,7 @@ export class RemoteControlService implements IRemoteControlService {
   /**
    * 设置屏幕回调
    */
-  setScreenCallback(callback: (image: ScreenImage) => void): void {
+  setScreenCallback(callback: (data: ArrayBuffer, width: number, height: number, timestamp: number) => void): void {
     this.screenCallback = callback;
   }
 
@@ -325,19 +334,62 @@ export class RemoteControlService implements IRemoteControlService {
     try {
       const cmdData = cmd.toJSON() as CmdDataJSON;
       const imageData = cmdData.imageData as ArrayBuffer | string;
+      const compressionMethodOrdinal = cmdData.compressionMethod as number || 0;
+      
+      console.log(`RemoteControlService: Handling Capture command - compressionMethod: ${compressionMethodOrdinal}`);
       
       if (this.screenCallback && imageData) {
-        // imageData 已经是 ArrayBuffer 类型了
-        const imageBuffer = imageData instanceof ArrayBuffer ? 
-          imageData : new ArrayBuffer(0);
+        const payloadBuffer = imageData instanceof ArrayBuffer ? imageData : new ArrayBuffer(0);
         
-        // 暂时使用固定的宽高，后续可以从压缩数据中解析
-        this.screenCallback({
-          data: imageBuffer,
-          width: 1920,
-          height: 1080,
-          timestamp: Date.now()
-        });
+        // 1. 将 payload 转换为 MemByteBuffer
+        const zippedData = MemByteBuffer.fromArray(new Uint8Array(payloadBuffer));
+        
+        // 2. 映射压缩方法
+        let squeezeMethod: SqueezeCompressionMethod = SqueezeCompressionMethod.NONE;
+        switch (compressionMethodOrdinal) {
+          case 1:
+            squeezeMethod = SqueezeCompressionMethod.ZIP;
+            break;
+          case 2:
+            squeezeMethod = SqueezeCompressionMethod.XZ;
+            break;
+          case 3:
+            squeezeMethod = SqueezeCompressionMethod.ZSTD;
+            break;
+        }
+        
+        console.log(`RemoteControlService: Using compression method: ${squeezeMethod}`);
+        
+        // 3. 获取压缩器并解压
+        const compressor = Compressor.get(squeezeMethod);
+        const capture: Capture = compressor.decompress(this.tileCache, zippedData);
+        
+        console.log(`RemoteControlService: Decompressed capture - ${capture.width}x${capture.height}`);
+        // 4. 组装成完整图像缓冲区
+        const imageBuffer: Uint8Array = capture.createImageBuffer(
+          this.prevImageBuffer,
+          this.prevImageWidth,
+          this.prevImageHeight
+        );
+        
+        // 5. 保存前一帧信息
+        this.prevImageBuffer = imageBuffer;
+        this.prevImageWidth = capture.width;
+        this.prevImageHeight = capture.height;
+        // 6. 传递给 UI - 直接传递单独的参数，避免结构类型问题
+        const imageDataBuffer: ArrayBuffer = imageBuffer.buffer.slice(0);
+        const currentTimestamp: number = Date.now();
+        if (this.screenCallback) {
+          this.screenCallback(
+            imageDataBuffer,
+            capture.width,
+            capture.height,
+            currentTimestamp
+          );
+        }
+        
+        // 7. 通知缓存处理完成
+        this.tileCache.onCaptureProcessed();
       }
     } catch (error) {
       console.error('RemoteControlService: Failed to handle capture command', error);
@@ -386,7 +438,8 @@ export class RemoteControlService implements IRemoteControlService {
       if (this.isValidating && this.validationCallback) {
         switch (status) {
           case 'OK':
-            console.log('RemoteControlService: Connection opened successfully');
+            console.log('RemoteControlService: Device is online, validation passed');
+            this.validationCallback({ valid: true, message: '设备验证成功' });
             break;
           case 'OFFLINE':
             console.error('RemoteControlService: Target device is offline');
@@ -638,29 +691,6 @@ export class RemoteControlService implements IRemoteControlService {
     }
   }
 
-  // 解析屏幕图像
-  private parseScreenImage(data: ArrayBuffer): void {
-    try {
-      // 假设数据格式：width(4) + height(4) + timestamp(8) + image data
-      const view = new DataView(data);
-      const width = view.getInt32(0, false);
-      const height = view.getInt32(4, false);
-      const timestamp = view.getFloat64(8, false);
-      const imageData = data.slice(16);
-
-      if (this.screenCallback) {
-        this.screenCallback({
-          data: imageData,
-          width: width,
-          height: height,
-          timestamp: timestamp
-        });
-      }
-    } catch (error) {
-      console.error('RemoteControlService: Failed to parse screen image', error);
-    }
-  }
-
   // 发送命令
   private async sendCmd(cmd: ConcreteCmd): Promise<void> {
     if (!this.socket || this.connectionState !== ConnectionState.CONNECTED) {
@@ -702,11 +732,14 @@ export class RemoteControlService implements IRemoteControlService {
   async openRemoteScreen(deviceCode: string, password: string): Promise<void> {
     console.info(`RemoteControlService: Opening remote screen for device ${deviceCode}`);
     
-    // 1. 发送打开连接请求
-    const openCmd = CmdCodec.createOpenCmd(deviceCode);
-    await this.sendCmd(openCmd);
+    // 更新远程设备信息和控制权限
+    this.remoteDeviceCode = deviceCode;
+    this.remotePassword = password;
+    this.remoteControlEnabled = true;
+    hilog.info(DOMAIN, TAG, '远程控制权限设置: 已启用');
     
-    // 2. 发送屏幕捕获请求 (START_CAPTURE = 0x00)
+    // 只发送屏幕捕获请求 (START_CAPTURE = 0x00)
+    // ReqOpen 已经在 validateDevice 中发送过了，不需要重复发送
     const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, 0);
     await this.sendCmd(captureCmd);
   }
@@ -929,37 +962,15 @@ export class RemoteControlService implements IRemoteControlService {
         resolve(result);
       };
 
-      // 发送打开连接请求
+      // 只发送 ReqOpen 命令验证设备是否在线
       (async () => {
         try {
-          // 发送打开连接请求
           const openCmd = CmdCodec.createOpenCmd(deviceCode);
-          console.log('RemoteControlService: Sending ReqOpen command', deviceCode);
+          console.log('RemoteControlService: Sending ReqOpen command for validation', deviceCode);
           await this.sendCmd(openCmd);
-          console.log('RemoteControlService: Sent ReqOpen command');
-
-          // 发送屏幕捕获请求（用于验证密码，START_CAPTURE = 0x00）
-          const captureCmd = CmdCodec.createCaptureCmd(deviceCode, password, 0);
-          console.log('RemoteControlService: Sending ReqCapture command', deviceCode);
-          await this.sendCmd(captureCmd);
-          console.log('RemoteControlService: Sent ReqCapture command');
-
-          // 由于服务端在验证成功时不会返回响应，直接认为验证成功
-          // 实际的验证结果会通过后续的操作（如屏幕捕获）来确认
-          setTimeout(() => {
-            if (this.isValidating) {
-              console.log('RemoteControlService: Validation timeout, assuming success');
-              this.isValidating = false;
-              this.validationCallback = null;
-              // 更新远程设备信息和控制状态
-              this.remoteDeviceCode = deviceCode;
-              this.remotePassword = password;
-              this.remoteControlEnabled = true;
-              resolve({ valid: true, message: '设备验证成功' });
-            }
-          }, 2000);
+          console.log('RemoteControlService: Sent ReqOpen command for validation');
         } catch (error) {
-          console.error('RemoteControlService: Failed to send validation commands', error);
+          console.error('RemoteControlService: Failed to send validation command', error);
           this.isValidating = false;
           this.validationCallback = null;
           resolve({ valid: false, message: '验证失败，请检查网络连接' });

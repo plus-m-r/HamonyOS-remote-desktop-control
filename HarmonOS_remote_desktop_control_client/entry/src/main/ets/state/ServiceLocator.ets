@@ -69,8 +69,9 @@ export class ServiceLocator {
     this.remoteControlService = new RemoteControlService(
       SERVER_CONFIG.host,
       SERVER_CONFIG.tcpPort,
-      (image: ScreenImage) => {
+      (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
         // 屏幕数据回调 - 更新全局状态
+        const image = new ScreenImage(data, width, height, timestamp);
         AppStateManager.setScreenImage(image);
       }
     );
