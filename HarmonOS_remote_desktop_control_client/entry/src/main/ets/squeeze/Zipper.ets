@@ -78,16 +78,9 @@ export class ZstdZipper implements Zipper {
       const file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
       console.log('ZstdZipper: 文件打开成功，开始写入');
       
-      let bytesWritten = 0;
-      const chunkSize = 4096;
-      while (bytesWritten < data.length) {
-        const end = Math.min(bytesWritten + chunkSize, data.length);
-        const chunk = data.subarray(bytesWritten, end);
-        const written = fs.writeSync(file.fd, chunk);
-        bytesWritten += written;
-      }
+      fs.writeSync(file.fd, data.buffer);
       
-      console.log('ZstdZipper: 文件写入完成，共写入', bytesWritten, '字节');
+      console.log('ZstdZipper: 文件写入完成，共写入', data.length, '字节');
       fs.closeSync(file);
     } catch (error) {
       const err = error as BusinessError;
