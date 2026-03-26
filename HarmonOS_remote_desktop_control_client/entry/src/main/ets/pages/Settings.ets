@@ -1,8 +1,7 @@
 // 设置页面 - 配置文件传输和剪贴板同步选项
 import { AppStateManager } from '../state/AppStateManager';
-import prompt from '@ohos.promptAction';
+import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
-import router from '@ohos.router';
 
 const TAG = 'SettingsPage';
 const DOMAIN = 0x0000;
@@ -34,11 +33,36 @@ struct Settings {
     showTransferNotifications: true,
     showClipboardNotifications: true
   };
+
+  private showToast(message: string, duration: number = 2000): void {
+    try {
+      const uiContext = this.getUIContext();
+      const promptActionInstance = uiContext.getPromptAction();
+      promptActionInstance.showToast({
+        message: message,
+        duration: duration
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '显示Toast失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private routerBack(): void {
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      routerInstance.back();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '返回失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
   aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, 'Settings页面开始加载');
     // 从AppStateManager加载设置
     this.loadSettings();
   }
+
   loadSettings(): void {
     // 从AppStateManager加载设置
     const savedSettings: SyncSettings | null = AppStateManager.getSyncSettings();
@@ -53,15 +77,14 @@ struct Settings {
       this.syncSettings.showClipboardNotifications = savedSettings.showClipboardNotifications ?? this.syncSettings.showClipboardNotifications;
     }
   }
+
   saveSettings(): void {
     // 保存设置到AppStateManager
     AppStateManager.setSyncSettings(this.syncSettings);
     
-    prompt.showToast({
-      message: '设置已保存',
-      duration: 2000
-    });
+    this.showToast('设置已保存', 2000);
   }
+
   @Builder
   SettingItem(title: string, subtitle: string) {
     Column() {
@@ -154,7 +177,7 @@ struct Settings {
       // 顶部标题
       Row() {
         Button('返回')
-          .onClick((): void => router.back())
+          .onClick((): void => this.routerBack())
         
         Text('设置')
           .fontSize(20)

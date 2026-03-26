@@ -215,29 +215,37 @@ public class RemoteClient extends RemoteFrame {
         if (System.getProperty("robotPort") != null) {
             robotPort = Integer.parseInt(System.getProperty("robotPort"));
         }
-        String serverIp = "192.168.0.110";
+        String serverIp = "127.0.0.1";
         Integer serverPort = 54321;
-        String clipboardServer = "http://192.168.0.110:12345/remote-desktop-control";
-        if (System.getProperty("configFile") != null) {
-            Properties properties = new Properties();
-            try (InputStream input = new FileInputStream(System.getProperty("configFile"))) {
-                properties.load(input);
-                if (properties.getProperty("serverIp") != null) {
-                    serverIp = properties.getProperty("serverIp");
-                }
-                if (properties.getProperty("serverPort") != null) {
-                    serverPort = Integer.parseInt(properties.getProperty("serverPort"));
-                }
-                if (properties.getProperty("clipboardServer") != null) {
-                    clipboardServer = properties.getProperty("clipboardServer");
-                }
-                if (properties.getProperty("robotPort") != null) {
-                    robotPort = Integer.parseInt(properties.getProperty("robotPort"));
-                }
-            } catch (Exception e) {
-                Log.warn("Load config file error!", e);
-            }
+        String clipboardServer = "http://127.0.0.1:12345/remote-desktop-control";
+        
+        // 默认读取当前目录下的config.properties
+        String configFile = System.getProperty("configFile");
+        if (configFile == null) {
+            configFile = "config.properties";
         }
+        
+        Properties properties = new Properties();
+        try (InputStream input = new FileInputStream(configFile)) {
+            properties.load(input);
+            if (properties.getProperty("serverIp") != null) {
+                serverIp = properties.getProperty("serverIp");
+            }
+            if (properties.getProperty("serverPort") != null) {
+                serverPort = Integer.parseInt(properties.getProperty("serverPort"));
+            }
+            if (properties.getProperty("clipboardServer") != null) {
+                clipboardServer = properties.getProperty("clipboardServer");
+            }
+            if (properties.getProperty("robotPort") != null) {
+                robotPort = Integer.parseInt(properties.getProperty("robotPort"));
+            }
+            Log.info("Loaded config from: " + configFile);
+        } catch (Exception e) {
+            Log.warn("Load config file error, using defaults!", e);
+        }
+        
+        Log.info("Connecting to server: " + serverIp + ":" + serverPort);
         RemoteClient remoteClient = new RemoteClient(serverIp, serverPort, clipboardServer, robotPort);
     }
 

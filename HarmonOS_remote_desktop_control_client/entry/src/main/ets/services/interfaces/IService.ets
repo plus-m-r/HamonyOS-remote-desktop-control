@@ -1,6 +1,6 @@
 // entry/src/main/ets/services/interfaces/IService.ets
 import { ConnectionState, RemoteControlEvent, Clipboard } from '../../models/DeviceInfo';
-import { ClientInfoCallback, ConnectionCallback, ClipboardCallback } from '../../models/CmdProtocol';
+import { ClientInfoCallback, ConnectionCallback, ClipboardCallback, ScreenCallback } from '../../models/CmdProtocol';
 
 /**
  * 设备凭据接口
@@ -80,7 +80,7 @@ export interface IRemoteControlService {
   /**
    * 设置屏幕回调
    */
-  setScreenCallback(callback: (data: ArrayBuffer, width: number, height: number, timestamp: number) => void): void;
+  setScreenCallback(callback: ScreenCallback): void;
 
   /**
    * 设置客户端信息回调

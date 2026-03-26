@@ -1,11 +1,10 @@
 // 连接测试页面
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
-import prompt from '@ohos.promptAction';
+import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { SERVER_CONFIG } from '../config/config';
 import http from '@ohos.net.http';
-import router from '@ohos.router';
 import { BusinessError } from '@ohos.base';
 
 const TAG = 'ConnectionTestPage';
@@ -18,6 +17,29 @@ struct ConnectionTest {
   @State serverInfo: string = '';
   @State testResult: string = '';
   @State isTesting: boolean = false;
+
+  private showToast(message: string, duration: number = 2000): void {
+    try {
+      const uiContext = this.getUIContext();
+      const promptActionInstance = uiContext.getPromptAction();
+      promptActionInstance.showToast({
+        message: message,
+        duration: duration
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '显示Toast失败: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private routerBack(): void {
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      routerInstance.back();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '返回失败: %{public}s', JSON.stringify(error));
+    }
+  }
 
   aboutToAppear() {
     this.updateServerInfo();
@@ -92,14 +114,11 @@ struct ConnectionTest {
         AppStateManager.setUserId(deviceCode);
         AppStateManager.setUserPassword(password);
         
-        prompt.showToast({
-          message: '✅ 设备信息已获取并保存',
-          duration: 3000
-        });
+        this.showToast('✅ 设备信息已获取并保存', 3000);
         
         // 3秒后自动返回主页
         setTimeout(() => {
-          router.back();
+          this.routerBack();
         }, 3000);
       });
       
@@ -124,10 +143,7 @@ struct ConnectionTest {
         (error: string) => {
           this.testResult = `❌ TCP连接失败: ${error}`;
           console.error(`${TAG}: TCP connection failed`, error);
-          prompt.showToast({
-            message: `连接失败: ${error}`,
-            duration: 3000
-          });
+          this.showToast(`连接失败: ${error}`, 3000);
           this.isTesting = false;
         }
       );
@@ -142,10 +158,7 @@ struct ConnectionTest {
             this.testResult = '❌ TCP连接失败或超时\n\n可能的原因：\n1. 服务器未启动\n2. 防火墙阻止连接\n3. IP地址或端口错误\n4. 服务器配置不正确\n\n建议：\n1. 确认服务器已启动\n2. 检查防火墙设置\n3. 验证IP地址和端口配置';
           }
           
-          prompt.showToast({
-            message: '未收到设备信息，请检查服务器',
-            duration: 3000
-          });
+          this.showToast('未收到设备信息，请检查服务器', 3000);
         }
         
         // 断开连接
@@ -162,10 +175,7 @@ struct ConnectionTest {
     } catch (error) {
       this.testResult = `❌ TCP连接异常: ${error}`;
       console.error(`${TAG}: TCP connection exception`, error);
-      prompt.showToast({
-        message: `连接异常: ${error}`,
-        duration: 3000
-      });
+      this.showToast(`连接异常: ${error}`, 3000);
       this.isTesting = false;
     }
   }
@@ -307,7 +317,7 @@ struct ConnectionTest {
         .fontSize(16)
         .margin({ top: 30 })
         .onClick(() => {
-          router.back();
+          this.routerBack();
         })
     }
     .width('100%')

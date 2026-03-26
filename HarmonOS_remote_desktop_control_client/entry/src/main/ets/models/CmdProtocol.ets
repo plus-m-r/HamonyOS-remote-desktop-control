@@ -49,11 +49,12 @@ export type OpenStatus = 'OK' | 'OFFLINE' | 'CONTROL';
 // 捕获状态枚举
 export type CaptureStatus = 'OK' | 'OFFLINE' | 'PWDERROR' | 'CONTROL' | 'STOP';
 
-// 压缩方法枚举
+// 压缩方法枚举（与Java端保持一致）
 export enum CompressionMethod {
-  ZSTD = 1,
+  NONE = 0,
+  ZIP = 1,
   XZ = 2,
-  ZIP = 3
+  ZSTD = 3
 }
 
 // ==================== 基础命令接口 ====================
@@ -223,9 +224,8 @@ export interface ClientInfo {
 }
 
 // ==================== 回调类型 ====================
-
 // 屏幕数据回调
-export type ScreenCallback = (capture: CmdCapture) => void;
+export type ScreenCallback = (data: ArrayBuffer, width: number, height: number, timestamp: number) => void;
 
 // 客户端信息回调
 export type ClientInfoCallback = (info: ClientInfo) => void;

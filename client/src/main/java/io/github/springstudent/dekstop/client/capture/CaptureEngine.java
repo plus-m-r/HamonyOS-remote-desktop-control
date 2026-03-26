@@ -1,5 +1,11 @@
 package io.github.springstudent.dekstop.client.capture;
 
+import java.awt.Dimension;
+import static java.lang.Math.min;
+import static java.lang.String.format;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import io.github.springstudent.dekstop.client.bean.Capture;
 import io.github.springstudent.dekstop.client.bean.CaptureTile;
 import io.github.springstudent.dekstop.client.bean.Listeners;
@@ -9,14 +15,6 @@ import io.github.springstudent.dekstop.common.bean.Gray8Bits;
 import io.github.springstudent.dekstop.common.configuration.CaptureEngineConfiguration;
 import io.github.springstudent.dekstop.common.configuration.ReConfigurable;
 import io.github.springstudent.dekstop.common.log.Log;
-import io.github.springstudent.dekstop.common.utils.UnitUtilities;
-
-import java.awt.*;
-import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static java.lang.Math.min;
-import static java.lang.String.format;
 
 public class CaptureEngine implements ReConfigurable<CaptureEngineConfiguration> {
 

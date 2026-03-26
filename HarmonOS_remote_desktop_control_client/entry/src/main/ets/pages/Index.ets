@@ -1,10 +1,13 @@
 // 使用HarmonyOS Design System (HDS) 风格的远程桌面控制客户端
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
-import prompt from '@ohos.promptAction';
+import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
-import router from '@ohos.router';
 import pasteboard from '@ohos.pasteboard';
+interface RouterParams {
+  deviceId?: string;
+  password?: string;
+}
 
 const TAG = 'IndexPage';
 const DOMAIN = 0x0000;
@@ -19,6 +22,33 @@ struct Index {
   @State waitingForServerInfo: boolean = true;
   @State remoteControlEnabled: boolean = true;
   @State isConnecting: boolean = false;
+
+  private showToast(message: string, duration: number = 2000): void {
+    try {
+      const uiContext = this.getUIContext();
+      const promptActionInstance = uiContext.getPromptAction();
+      promptActionInstance.showToast({
+        message: message,
+        duration: duration
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '显示Toast失败: %{public}s', JSON.stringify(error));
+    }
+  }
+  private routerPushUrl(url: string, params?: RouterParams): void {
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      routerInstance.pushUrl({
+        url: url,
+        params: params
+      }).catch((error: Error) => {
+        hilog.error(DOMAIN, TAG, '跳转失败: %{public}s', JSON.stringify(error));
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '跳转失败: %{public}s', JSON.stringify(error));
+    }
+  }
   
   async aboutToAppear() {
     hilog.info(DOMAIN, TAG, 'Index页面开始加载');
@@ -40,10 +70,7 @@ struct Index {
         this.userPassword = password;
         this.waitingForServerInfo = false;
         
-        prompt.showToast({
-          message: '设备信息已获取',
-          duration: 2000
-        });
+        this.showToast('设备信息已获取', 2000);
       });
       
       // 获取用户信息
@@ -61,19 +88,13 @@ struct Index {
       // 如果用户ID为空，显示等待服务器分配状态
       if (!this.userId) {
         this.waitingForServerInfo = true;
-        prompt.showToast({
-          message: '正在等待服务器分配设备信息...',
-          duration: 3000
-        });
+        this.showToast('正在等待服务器分配设备信息...', 3000);
       } else {
         this.waitingForServerInfo = false;
       }
     } catch (error) {
       hilog.error(DOMAIN, TAG, '页面初始化失败: %{public}s', JSON.stringify(error));
-      prompt.showToast({
-        message: '页面初始化失败，请检查网络连接',
-        duration: 3000
-      });
+      this.showToast('页面初始化失败，请检查网络连接', 3000);
     }
   }
 
@@ -85,10 +106,7 @@ struct Index {
   // 连接到远程设备
   async connectToDevice() {
     if (!this.deviceIdInput || !this.devicePasswordInput) {
-      prompt.showToast({
-        message: '请输入设备ID和密码',
-        duration: 2000
-      });
+      this.showToast('请输入设备ID和密码', 2000);
       return;
     }
 
@@ -101,10 +119,7 @@ struct Index {
       this.isConnecting = true;
       hilog.info(DOMAIN, TAG, '正在验证设备: %{public}s', this.deviceIdInput);
       
-      prompt.showToast({
-        message: '正在验证设备信息...',
-        duration: 2000
-      });
+      this.showToast('正在验证设备信息...', 2000);
 
       // 验证设备ID和密码
       const remoteControlService = ServiceProvider.remoteControlService;
@@ -112,10 +127,7 @@ struct Index {
       
       if (!validationResult.valid) {
         hilog.error(DOMAIN, TAG, '设备验证失败: %{public}s', validationResult.message);
-        prompt.showToast({ 
-          message: validationResult.message,
-          duration: 3000 
-        });
+        this.showToast(validationResult.message, 3000);
         return;
       }
 
@@ -123,20 +135,14 @@ struct Index {
       remoteControlService.setDeviceInfo(this.deviceIdInput, this.devicePasswordInput);
       
       // 跳转到控制页面
-      router.pushUrl({ 
-        url: 'pages/Control',
-        params: {
-          deviceId: this.deviceIdInput,
-          password: this.devicePasswordInput
-        }
+      this.routerPushUrl('pages/Control', {
+        deviceId: this.deviceIdInput,
+        password: this.devicePasswordInput
       });
       
     } catch (error) {
       hilog.error(DOMAIN, TAG, '连接失败: %{public}s', JSON.stringify(error));
-      prompt.showToast({ 
-        message: '连接失败，请检查设备ID和密码', 
-        duration: 3000 
-      });
+      this.showToast('连接失败，请检查设备ID和密码', 3000);
     } finally {
       this.isConnecting = false;
     }
@@ -145,28 +151,19 @@ struct Index {
   // 复制设备ID到剪贴板
   copyDeviceId() {
     // 这里应该实现复制到剪贴板的逻辑
-    prompt.showToast({
-      message: '设备ID已复制',
-      duration: 2000
-    });
+    this.showToast('设备ID已复制', 2000);
   }
 
   // 复制密码到剪贴板
   copyPassword() {
     // 这里应该实现复制到剪贴板的逻辑
-    prompt.showToast({
-      message: '密码已复制',
-      duration: 2000
-    });
+    this.showToast('密码已复制', 2000);
   }
 
   // 一键复制设备ID和连接密码
   copyAllDeviceInfo() {
     if (!this.userId || !this.userPassword) {
-      prompt.showToast({
-        message: '设备信息未获取，无法复制',
-        duration: 2000
-      });
+      this.showToast('设备信息未获取，无法复制', 2000);
       return;
     }
 
@@ -181,24 +178,15 @@ struct Index {
       systemPasteboard.setData(pasteData, (err) => {
         if (err) {
           hilog.error(DOMAIN, TAG, '复制到剪贴板失败: %{public}s', JSON.stringify(err));
-          prompt.showToast({
-            message: '复制失败，请重试',
-            duration: 2000
-          });
+          this.showToast('复制失败，请重试', 2000);
         } else {
           hilog.info(DOMAIN, TAG, '设备信息已复制到剪贴板 - ID: %{public}s, 密码: %{public}s', this.userId, this.userPassword);
-          prompt.showToast({
-            message: '设备ID和密码已复制到剪贴板',
-            duration: 2000
-          });
+          this.showToast('设备ID和密码已复制到剪贴板', 2000);
         }
       });
     } catch (error) {
       hilog.error(DOMAIN, TAG, '复制设备信息失败: %{public}s', JSON.stringify(error));
-      prompt.showToast({
-        message: '复制失败，请检查权限',
-        duration: 2000
-      });
+      this.showToast('复制失败，请检查权限', 2000);
     }
   }
   // 鸿蒙风格卡片组件
@@ -460,10 +448,7 @@ struct Index {
     AppStateManager.setRemoteControlEnabled(isOn);
     
     // 显示提示
-    prompt.showToast({
-      message: isOn ? '远程控制权限已开启' : '远程控制权限已关闭',
-      duration: 2000
-    });
+    this.showToast(isOn ? '远程控制权限已开启' : '远程控制权限已关闭', 2000);
     
     // 通知远程控制服务权限状态变化
     try {

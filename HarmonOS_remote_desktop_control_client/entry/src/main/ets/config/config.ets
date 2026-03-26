@@ -23,7 +23,7 @@ interface ConfigOptions {
 const CONFIG_OPTIONS: ConfigOptions = {
   // 原始服务端配置
   ORIGINAL: {
-    host: '10.117.55.247',
+    host: '10.246.255.247',
     tcpPort: 54321,
     httpPort: 12345,
     contextPath: '/remote-desktop-control'

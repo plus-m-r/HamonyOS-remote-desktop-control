@@ -8,12 +8,9 @@ import { ScreenImage, ConnectionState } from '../models/DeviceInfo';
 import { UploadFile } from '../services/file/FileService';
 import { image } from '@kit.ImageKit';
 
-
-
-
-
 const TAG = 'ControlPage';
 const DOMAIN = 0x0000;
+
 // 文件接口
 interface UploadableFile {
   name: string;
@@ -91,12 +88,18 @@ struct Control {
       deviceId?: string;
       password?: string;
     }
-    const params = router.getParams() as RouterParams;
-    if (params) {
-      this.remoteDeviceId = params.deviceId || '';
-      this.remoteDevicePassword = params.password || '';
-      hilog.info(DOMAIN, TAG, '获取到路由参数 - deviceId: %{public}s, hasPassword: %{public}s', 
-        this.remoteDeviceId, !!this.remoteDevicePassword);
+    try {
+      const uiContext = this.getUIContext();
+      const routerInstance = uiContext.getRouter();
+      const params = routerInstance.getParams() as RouterParams;
+      if (params) {
+        this.remoteDeviceId = params.deviceId || '';
+        this.remoteDevicePassword = params.password || '';
+        hilog.info(DOMAIN, TAG, '获取到路由参数 - deviceId: %{public}s, hasPassword: %{public}s', 
+          this.remoteDeviceId, !!this.remoteDevicePassword);
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '获取路由参数失败: %{public}s', JSON.stringify(error));
     }
 
     // 检查当前连接状态
@@ -180,17 +183,34 @@ struct Control {
   handleScreenImage(screenData: ScreenImage): void {
     // 处理屏幕图像数据
     // 更新屏幕图像和尺寸
-    this.createPixelMapFromBuffer(screenData.data);
     this.screenWidth = screenData.width;
     this.screenHeight = screenData.height;
     hilog.info(DOMAIN, TAG, '收到屏幕图像: %{public}d x %{public}d', screenData.width, screenData.height);
+    this.createPixelMapFromRawData(screenData.data, screenData.width, screenData.height);
   }
 
-  // ArrayBuffer转PixelMap
-  private createPixelMapFromBuffer(buffer: ArrayBuffer): void {
+  // 从原始像素数据创建PixelMap
+  private createPixelMapFromRawData(buffer: ArrayBuffer, width: number, height: number): void {
     try {
-      const imgSource = image.createImageSource(buffer);
-      imgSource.createPixelMap().then((pixelMap: image.PixelMap) => {
+      // 检查数据完整性
+      const expectedSize = width * height * 4; // ARGB格式每个像素4字节
+      if (buffer.byteLength !== expectedSize) {
+        hilog.warn(DOMAIN, TAG, '图像数据大小不匹配: 期望 %{public}d, 实际 %{public}d', expectedSize, buffer.byteLength);
+        // 不直接返回，尝试使用现有数据
+      }
+      // Java端使用大端序发送ARGB数据（AA,RR,GG,BB）
+      // 鸿蒙ARGB_8888格式期望（AA,RR,GG,BB），正好匹配！
+      const opts: image.InitializationOptions = {
+        size: {
+          height: height,
+          width: width
+        },
+        pixelFormat: image.PixelMapFormat.ARGB_8888,
+        editable: false,
+        alphaType: image.AlphaType.OPAQUE
+      };
+
+      image.createPixelMap(buffer, opts).then((pixelMap: image.PixelMap) => {
         this.screenImage = pixelMap;
       }).catch((error: Error) => {
         hilog.error(DOMAIN, TAG, '创建PixelMap失败: %{public}s', JSON.stringify(error));
@@ -321,7 +341,7 @@ struct Control {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#f5f5f5')
+      .backgroundColor('#ffffff')
       .onDragEnter(() => this.showDragHint())
       .onDragLeave(() => this.hideDragHint())
       .onDrop((event?: DragEvent, extraParams?: string) => {

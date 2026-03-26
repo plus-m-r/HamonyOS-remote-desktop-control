@@ -8,6 +8,8 @@ export class MemByteBuffer {
     this.buffer = new Uint8Array(initialCapacity);
   }
 
+
+
   static fromArray(array: Uint8Array): MemByteBuffer {
     const result = new MemByteBuffer(array.length);
     result.writeBytes(array);
@@ -87,6 +89,7 @@ export class MemByteBuffer {
     return result;
   }
 
+
   readUnsignedShort(): number {
     if (this.readOffset + 2 > this.writeOffset) {
       throw new Error('Buffer underflow');
@@ -123,9 +126,12 @@ export class MemByteBuffer {
   getInternal(): Uint8Array {
     return this.buffer.subarray(0, this.writeOffset);
   }
-
   size(): number {
     return this.writeOffset;
+  }
+
+  getReadOffset(): number {
+    return this.readOffset;
   }
 
   reset(): void {

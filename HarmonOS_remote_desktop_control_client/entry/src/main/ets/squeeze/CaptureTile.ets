@@ -35,7 +35,13 @@ export class CaptureTile {
 
   static fromSingleLevel(xywh: XYWH, singleLevel: number): CaptureTile {
     const data = new Uint8Array(xywh.w * xywh.h * 4);
-    data.fill(singleLevel);
+    // BGRA格式：B, G, R, A
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = singleLevel;     // B
+      data[i + 1] = singleLevel; // G
+      data[i + 2] = singleLevel; // R
+      data[i + 3] = 0xff;        // A (不透明)
+    }
     const capture = MemByteBuffer.fromArray(data);
     return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
   }
