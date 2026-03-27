@@ -282,39 +282,56 @@ struct Control {
   toggleToolbar(): void {
     this.isToolbarVisible = !this.isToolbarVisible;
   }
+  @State isLongPress: boolean = false;
+  private longPressTimer: number | null = null;
+
   handleTouchStart(event: GestureEvent): void {
-    // 触摸开始，记录初始位置
+    // 触摸开始，记录位置并设置长按定时器
     this.lastTouchX = event.offsetX;
     this.lastTouchY = event.offsetY;
+    this.isLongPress = false;
+    
+    // 设置长按定时器，500ms后认为是长按
+    this.longPressTimer = setTimeout(() => {
+      this.isLongPress = true;
+      // 发送鼠标右键点击命令
+      this.remoteControlService.sendMouseControl(
+        event.offsetX,
+        event.offsetY,
+        2, // 2表示右键点击
+        undefined
+      );
+    }, 500);
   }
 
   handleTouchMove(event: GestureEvent): void {
-    // 触摸移动，发送鼠标移动命令
-    const deltaX = event.offsetX - this.lastTouchX;
-    const deltaY = event.offsetY - this.lastTouchY;
+    // 触摸移动，重置长按定时器
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
     
-    // 发送鼠标移动命令
-    this.remoteControlService.sendMouseControl(
-      event.offsetX,
-      event.offsetY,
-      0, // 0表示移动
-      undefined
-    );
-    
-    // 更新最后位置
+    // 记录当前位置
     this.lastTouchX = event.offsetX;
     this.lastTouchY = event.offsetY;
   }
 
   handleTouchEnd(event: GestureEvent): void {
-    // 触摸结束，发送鼠标点击命令
-    // 发送鼠标点击命令（左键点击）
-    this.remoteControlService.sendMouseControl(
-      event.offsetX,
-      event.offsetY,
-      1, // 1表示左键点击
-      undefined
-    );
+    // 触摸结束，清除定时器
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+    
+    // 如果不是长按，则发送左键点击命令
+    if (!this.isLongPress) {
+      this.remoteControlService.sendMouseControl(
+        event.offsetX,
+        event.offsetY,
+        1, // 1表示左键点击
+        undefined
+      );
+    }
   }
 
   @Builder
