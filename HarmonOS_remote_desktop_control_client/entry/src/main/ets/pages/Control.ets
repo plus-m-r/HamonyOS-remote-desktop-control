@@ -1,7 +1,7 @@
 // 远程控制页面 - 实现无感文件传输和剪贴板同步
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
-import { promptAction, router } from '@kit.ArkUI';
+import { promptAction, router, GestureGroup, GestureMode, PanGesture, PinchGesture, GestureEvent, ImageFit, Alignment, DragEvent } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { AppState } from '../state/AppStateManager';
 import { ScreenImage, ConnectionState } from '../models/DeviceInfo';
@@ -38,6 +38,8 @@ struct Control {
   @State lastTouchX: number = 0;
   @State lastTouchY: number = 0;
   @State screenImage: image.PixelMap | null = null;
+  @State scale: number = 1.0;
+  @State lastScale: number = 1.0;
 
   private remoteControlService = ServiceProvider.remoteControlService;
   private fileService = ServiceProvider.fileService;
@@ -58,6 +60,9 @@ struct Control {
 
   private routerBack(): void {
     try {
+      // 关闭远程屏幕控制，但保持与服务器的连接
+      this.remoteControlService.closeRemoteScreen();
+      
       const uiContext = this.getUIContext();
       const routerInstance = uiContext.getRouter();
       routerInstance.back();
@@ -141,7 +146,13 @@ struct Control {
     }
   }
   aboutToDisappear(): void {
-    // 不再断开连接，保持应用级连接
+    // 关闭远程屏幕控制，但保持与服务器的连接
+    try {
+      this.remoteControlService.closeRemoteScreen();
+      hilog.info(DOMAIN, TAG, '已关闭远程屏幕控制');
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '关闭远程屏幕失败: %{public}s', JSON.stringify(error));
+    }
   }
   openRemoteScreen(): void {
     hilog.info(DOMAIN, TAG, 'openRemoteScreen被调用 - deviceId: %{public}s, hasPassword: %{public}s, connectionState: %{public}s',
@@ -318,6 +329,7 @@ struct Control {
             .width('100%')
             .height('100%')
             .objectFit(ImageFit.Contain)
+            .scale({ x: this.scale, y: this.scale })
         } else {
           // 显示默认提示
           Text('远程屏幕')
@@ -341,7 +353,7 @@ struct Control {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#ffffff')
+      .backgroundColor('#000000')
       .onDragEnter(() => this.showDragHint())
       .onDragLeave(() => this.hideDragHint())
       .onDrop((event?: DragEvent, extraParams?: string) => {
@@ -349,7 +361,7 @@ struct Control {
         this.handleFileDrop();
       })
       .gesture(
-        GestureGroup(GestureMode.Exclusive,
+        GestureGroup(GestureMode.Parallel,
           PanGesture({ distance: 1 })
             .onActionStart((event: GestureEvent) => {
               this.handleTouchStart(event);
@@ -359,6 +371,18 @@ struct Control {
             })
             .onActionEnd((event: GestureEvent) => {
               this.handleTouchEnd(event);
+            }),
+          PinchGesture()
+            .onActionStart(() => {
+              this.lastScale = this.scale;
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              this.scale = this.lastScale * event.scale;
+              // 限制缩放范围，防止过度缩放
+              this.scale = Math.max(0.1, Math.min(5.0, this.scale));
+            })
+            .onActionEnd(() => {
+              this.lastScale = this.scale;
             })
         )
       )
@@ -395,36 +419,11 @@ struct Control {
   
   build() {
     Column() {
-      // 顶部标题
-      Row() {
-        Text('远程控制')
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#182431')
-        Text(this.connectionState === AppState.CONNECTED ? '已连接' : '未连接')
-          .fontSize(14)
-          .fontColor(this.connectionState === AppState.CONNECTED ? '#34C759' : '#FF3B30')
-          .margin({ left: 12 })
-      }
-      .width('100%')
-      .padding(16)
-      .backgroundColor('#fff')
-      .shadow({
-        radius: 4,
-        color: '#10000000',
-        offsetX: 0,
-        offsetY: 2
-      })
-      // 远程屏幕区域
+      // 远程屏幕区域（占满整个屏幕）
       this.buildRemoteScreen()
-      
-      // 控制工具栏
-      if (this.isToolbarVisible) {
-        this.buildControlToolbar()
-      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#f8f8f8')
+    .backgroundColor('#000')
   }
 }
