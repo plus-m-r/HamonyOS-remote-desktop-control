@@ -2,9 +2,8 @@ import http from '@ohos.net.http';
 import { FileInfo } from '../../models/DeviceInfo';
 import { BusinessError } from '@ohos.base';
 import fs from '@ohos.file.fs';
-import cryptoFramework from '@ohos.security.cryptoFramework';
-import { util } from '@kit.ArkTS';
 import { IFileService } from '../interfaces/IService';
+import { FileWorkerManager } from '../../utils/FileWorkerManager';
 
 // 文件上传接口
 export interface UploadFile {
@@ -16,10 +15,12 @@ export class FileService implements IFileService {
   private baseUrl: string;
   private httpModule: http.HttpRequest;
   private chunkSize: number = 5 * 1024 * 1024; // 5MB per chunk
+  private fileWorkerManager: FileWorkerManager = new FileWorkerManager();
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
     this.httpModule = http.createHttp();
+    this.fileWorkerManager.init();
   }
 
   // 下载文件
@@ -179,32 +180,10 @@ export class FileService implements IFileService {
     }
   }
 
-  // 计算文件 MD5
+  // 计算文件 MD5（使用Worker在后台线程执行）
   async calculateMD5(filePath: string): Promise<string> {
     try {
-      const file = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
-      const stat = fs.statSync(filePath);
-      const fileSize = stat.size;
-      
-      const md = cryptoFramework.createMd('SHA256');
-      const buffer = new ArrayBuffer(1024 * 1024); // 1MB buffer
-      
-      let offset = 0;
-      while (offset < fileSize) {
-        const readSize = Math.min(buffer.byteLength, fileSize - offset);
-        const data = fs.readSync(file.fd, buffer, { offset: 0, length: readSize });
-        if (data > 0) {
-          await md.update({ data: new Uint8Array(buffer, 0, data) });
-          offset += data;
-        } else {
-          break;
-        }
-      }
-      
-      fs.closeSync(file);
-      const result = await md.digest();
-      const base64Helper = new util.Base64Helper();
-      return base64Helper.encodeToStringSync(result.data);
+      return await this.fileWorkerManager.calculateMD5(filePath);
     } catch (error) {
       const err = error as BusinessError;
       console.error('FileService: Failed to calculate MD5', err.message);

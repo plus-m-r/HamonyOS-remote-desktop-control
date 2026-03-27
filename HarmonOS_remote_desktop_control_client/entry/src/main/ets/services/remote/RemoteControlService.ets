@@ -15,10 +15,8 @@ import {
   ClipboardCallback,
   ClipboardData
 } from '../../models/CmdProtocol';
-import { Compressor, CompressionMethod as SqueezeCompressionMethod } from '../../squeeze/Compressor';
-import { Capture } from '../../squeeze/Capture';
-import { MemByteBuffer } from '../../squeeze/MemByteBuffer';
-import { TileCache, NullTileCache } from '../../squeeze/TileCache';
+import { WorkerManager } from '../../utils/WorkerManager';
+import { ProtocolWorkerManager } from '../../utils/ProtocolWorkerManager';
 
 // 日志相关常量
 const DOMAIN: number = 0xFF00;
@@ -58,13 +56,6 @@ interface CmdDataJSON {
   id?: string;
 }
 
-// 捕获任务接口
-interface CaptureTask {
-  cmd: ConcreteCmd;
-  imageData: ArrayBuffer | string;
-  compressionMethodOrdinal: number;
-}
-
 export class RemoteControlService implements IRemoteControlService {
   private host: string;
   private port: number;
@@ -89,11 +80,11 @@ export class RemoteControlService implements IRemoteControlService {
   private validationCallback: ((result: DeviceValidationResult) => void) | null = null;
   private isValidating: boolean = false;
   
-  private tileCache: TileCache = new NullTileCache();
   private prevImageBuffer: Uint8Array | null = null;
   private prevImageWidth: number = 0;
   private prevImageHeight: number = 0;
-  private loggedCaptureData: boolean = false;
+  private workerManager: WorkerManager = new WorkerManager();
+  private protocolWorkerManager: ProtocolWorkerManager = new ProtocolWorkerManager();
 
   constructor(
     host: string, 
@@ -111,6 +102,10 @@ export class RemoteControlService implements IRemoteControlService {
     this.connectionCallback = connectionCallback || null;
     this.clipboardCallback = clipboardCallback || null;
     this.deviceInfoCallback = deviceInfoCallback || null;
+    // 初始化WorkerManager
+    this.workerManager.init();
+    // 初始化ProtocolWorkerManager
+    this.protocolWorkerManager.init();
   }
 
   /**
@@ -267,19 +262,12 @@ export class RemoteControlService implements IRemoteControlService {
   private async handleMessage(data: ArrayBuffer): Promise<void> {
     try {
       console.log('RemoteControlService: handleMessage called, data size:', data.byteLength);
-      // 合并缓冲区
-      const newBuffer = new ArrayBuffer(this.receiveBuffer.byteLength + data.byteLength);
-      const newView = new Uint8Array(newBuffer);
-      newView.set(new Uint8Array(this.receiveBuffer), 0);
-      newView.set(new Uint8Array(data), this.receiveBuffer.byteLength);
-      this.receiveBuffer = newBuffer;
 
-      // 使用 CmdCodec 提取命令
-      const extractResult = CmdCodec.extractCommands(this.receiveBuffer);
-      const remainingBuffer = extractResult[0];
-      const commands = extractResult[1];
-      this.receiveBuffer = remainingBuffer;
-      
+      // 使用 ProtocolWorker 在后台线程合并缓冲区并提取命令
+      const result = await this.protocolWorkerManager.processMessage(this.receiveBuffer, data);
+      this.receiveBuffer = result.remainingBuffer;
+      const commands = result.commands;
+
       console.log('RemoteControlService: Extracted', commands.length, 'commands');
 
       // 处理每个命令
@@ -351,139 +339,48 @@ export class RemoteControlService implements IRemoteControlService {
       const cmdData = cmd.toJSON() as CmdDataJSON;
       const imageData = cmdData.imageData as ArrayBuffer | string;
       const compressionMethodOrdinal = cmdData.compressionMethod as number || 0;
-      
+
       console.log(`[步骤1-数据接收] imageData类型: ${typeof imageData}, 大小: ${imageData instanceof ArrayBuffer ? imageData.byteLength : (imageData as string).length}字节, 压缩方法: ${compressionMethodOrdinal}`);
-      
+
       if (this.screenCallback && imageData) {
-        // 限制队列大小，防止内存溢出
-        if (this.decompressQueue.length > 10) {
-          console.warn('RemoteControlService: Queue size exceeds limit, dropping oldest task');
-          this.decompressQueue.shift(); // 移除最旧的任务
+        const payloadBuffer = imageData instanceof ArrayBuffer ? imageData : new ArrayBuffer(0);
+
+        if (payloadBuffer.byteLength === 0) {
+          console.warn('RemoteControlService: Empty payload buffer, skipping processing');
+          return;
         }
-        
-        // 异步处理捕获命令
-        this.decompressQueue.push({ cmd, imageData, compressionMethodOrdinal });
-        console.log(`[步骤1-数据接收] 加入解压队列，当前队列长度: ${this.decompressQueue.length}`);
-        if (!this.isProcessing) {
-          this.processNext();
+
+        // 使用Worker处理捕获任务
+        const result = await this.workerManager.submitCaptureTask({
+          imageData: payloadBuffer,
+          compressionMethodOrdinal: compressionMethodOrdinal
+        });
+
+        console.log(`[步骤2-任务处理] Worker处理完成, 图像尺寸: ${result.width}x${result.height}, 大小: ${result.imageBuffer.byteLength}字节`);
+
+        // 安全检查：确保图像缓冲区有效
+        if (result.imageBuffer.byteLength === 0) {
+          console.warn('RemoteControlService: Empty image buffer, skipping UI update');
+          return;
+        }
+
+        // 保存前一帧信息
+        this.prevImageBuffer = new Uint8Array(result.imageBuffer);
+        this.prevImageWidth = result.width;
+        this.prevImageHeight = result.height;
+
+        // 传递给 UI
+        if (this.screenCallback) {
+          this.screenCallback(
+            result.imageBuffer,
+            result.width,
+            result.height,
+            Date.now()
+          );
         }
       }
     } catch (error) {
       console.error('RemoteControlService: Failed to handle capture command', error);
-    }
-  }
-  // 异步处理队列
-  private decompressQueue: Array<CaptureTask> = [];
-  private isProcessing: boolean = false;
-  
-  // 处理队列中的下一个任务
-  private async processNext(): Promise<void> {
-    if (this.decompressQueue.length === 0) {
-      this.isProcessing = false;
-      return;
-    }
-    
-    this.isProcessing = true;
-    const task = this.decompressQueue.shift();
-    if (!task) {
-      this.isProcessing = false;
-      return;
-    }
-    
-    try {
-      await this.processCaptureTask(task);
-    } catch (error) {
-      console.error('RemoteControlService: Failed to process capture task', error);
-    } finally {
-      // 使用setTimeout避免递归调用导致堆栈溢出
-      setTimeout(() => {
-        this.processNext();
-      }, 0);
-    }
-  }
-  // 处理单个捕获任务
-  private async processCaptureTask(task: CaptureTask): Promise<void> {
-    const startTime = Date.now();
-    try {
-      const imageData = task.imageData;
-      const compressionMethodOrdinal = task.compressionMethodOrdinal;
-      
-      const payloadBuffer = imageData instanceof ArrayBuffer ? imageData : new ArrayBuffer(0);
-      
-      console.log(`[步骤2-任务处理] payloadBuffer大小: ${payloadBuffer.byteLength}字节, 压缩方法序号: ${compressionMethodOrdinal}`);
-      
-      if (payloadBuffer.byteLength === 0) {
-        console.warn('RemoteControlService: Empty payload buffer, skipping processing');
-        return;
-      }
-      
-      // 1. 将 payload 转换为 MemByteBuffer
-      const zippedData = MemByteBuffer.fromArray(new Uint8Array(payloadBuffer));
-      console.log(`[步骤2-任务处理] 创建MemByteBuffer, 大小: ${zippedData.size()}字节`);
-      
-      // 2. 映射压缩方法
-      let squeezeMethod: SqueezeCompressionMethod = SqueezeCompressionMethod.NONE;
-      switch (compressionMethodOrdinal) {
-        case 1:
-          squeezeMethod = SqueezeCompressionMethod.ZIP;
-          break;
-        case 2:
-          squeezeMethod = SqueezeCompressionMethod.XZ;
-          break;
-        case 3:
-          squeezeMethod = SqueezeCompressionMethod.ZSTD;
-          break;
-      }
-      console.log(`[步骤2-任务处理] 映射压缩方法: ${compressionMethodOrdinal} -> ${squeezeMethod}`);
-      
-      // 3. 获取压缩器并解压
-      const compressor = Compressor.get(squeezeMethod);
-      console.log(`[步骤2-任务处理] 开始解压缩...`);
-      const capture = await compressor.decompress(this.tileCache, zippedData);
-      console.log(`[步骤2-任务处理] 解压缩完成, capture尺寸: ${capture.width}x${capture.height}, tile尺寸: ${capture.tileWidth}x${capture.tileHeight}, dirty tiles数量: ${capture.dirtyTiles.length}`);
-      
-      // 4. 组装成完整图像缓冲区
-      const imageBuffer: Uint8Array = capture.createImageBuffer(
-        capture.reset ? null : this.prevImageBuffer,
-        capture.reset ? 0 : this.prevImageWidth,
-        capture.reset ? 0 : this.prevImageHeight
-      );
-      
-      console.log(`[步骤2-任务处理] 图像缓冲区创建完成, 大小: ${imageBuffer.length}字节 (${imageBuffer.length / 4}像素)`);
-      
-      // 安全检查：确保图像缓冲区有效
-      if (imageBuffer.length === 0) {
-        console.warn('RemoteControlService: Empty image buffer, skipping UI update');
-        return;
-      }
-      
-      // 5. 保存前一帧信息
-      this.prevImageBuffer = imageBuffer;
-      this.prevImageWidth = capture.width;
-      this.prevImageHeight = capture.height;
-      
-      // 6. 传递给 UI
-      if (this.screenCallback) {
-        // 正确地将 Uint8Array 转换为 ArrayBuffer
-        const slicedBuffer = imageBuffer.slice();
-        const dataBuffer = slicedBuffer.buffer as ArrayBuffer;
-        this.screenCallback(
-          dataBuffer,
-          capture.width,
-          capture.height,
-          Date.now()
-        );
-      }
-      
-      // 7. 通知缓存处理完成
-      this.tileCache.onCaptureProcessed();
-      
-      const processingTime = Date.now() - startTime;
-      if (processingTime > 100) {
-        console.warn(`RemoteControlService: Processing time high: ${processingTime}ms`);
-      }
-    } catch (error) {
-      console.error('RemoteControlService: Failed to process capture task', error);
     }
   }
 
@@ -994,6 +891,11 @@ export class RemoteControlService implements IRemoteControlService {
         await this.socket.close();
         this.socket = null;
       }
+      
+      // 销毁WorkerManager
+      this.workerManager.destroy();
+      // 销毁ProtocolWorkerManager
+      this.protocolWorkerManager.destroy();
       
       this.connectionState = ConnectionState.DISCONNECTED;
       console.info('RemoteControlService: Disconnected');
