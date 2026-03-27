@@ -58,6 +58,17 @@ struct Control {
     }
   }
 
+  private getWindowHeight(): number {
+    try {
+      const uiContext = this.getUIContext();
+      const windowSize = uiContext.getWindowProperties();
+      return windowSize.height;
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, '获取窗口高度失败: %{public}s', JSON.stringify(error));
+      return 1080; // 默认值
+    }
+  }
+
   private routerBack(): void {
     try {
       // 关闭远程屏幕控制，但保持与服务器的连接
@@ -293,14 +304,20 @@ struct Control {
     
     // 设置长按定时器，500ms后认为是长按
     this.longPressTimer = setTimeout(() => {
-      this.isLongPress = true;
-      // 发送鼠标右键点击命令
-      this.remoteControlService.sendMouseControl(
-        event.offsetX,
-        event.offsetY,
-        2, // 2表示右键点击
-        undefined
-      );
+      // 检查是否在屏幕底部20%区域内（右键区域）
+      const screenHeight = this.getWindowHeight();
+      const isInRightClickArea = event.offsetY > screenHeight * 0.8;
+      
+      if (isInRightClickArea) {
+        this.isLongPress = true;
+        // 发送鼠标右键点击命令
+        this.remoteControlService.sendMouseControl(
+          event.offsetX,
+          event.offsetY,
+          2, // 2表示右键点击
+          undefined
+        );
+      }
     }, 500);
   }
 
