@@ -383,6 +383,14 @@ struct Control {
             })
             .onActionEnd(() => {
               this.lastScale = this.scale;
+            }),
+          PanGesture({ distance: 1, fingers: 3 })
+            .onActionEnd((event: GestureEvent) => {
+              // 检测向上滑动
+              if (event.offsetY < -50) {
+                // 唤出设置界面
+                this.routerPushUrl('pages/Settings');
+              }
             })
         )
       )
