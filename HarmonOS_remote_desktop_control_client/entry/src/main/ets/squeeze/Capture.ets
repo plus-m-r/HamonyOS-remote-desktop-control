@@ -150,19 +150,19 @@ export class Capture {
         // 确保不会读取超出src范围的数据
         if (srcPos >= src.length) {
           // 数据不足时，使用默认值（黑色）
-          buffer[destPos] = 0;     // B
-          buffer[destPos + 1] = 0; // G
-          buffer[destPos + 2] = 0; // R
-          buffer[destPos + 3] = 0xff;      // A
+          buffer[destPos] = 0xff;      // A
+          buffer[destPos + 1] = 0; // R
+          buffer[destPos + 2] = 0; // G
+          buffer[destPos + 3] = 0;     // B
           underflowCount++;
         } else {
           // 将8位灰度值转换为32位ARGB格式
           // 灰度值同时设置到R、G、B通道，A通道设为255（不透明）
           const grayValue = src[srcPos++];
-          buffer[destPos] = grayValue;     // B
-          buffer[destPos + 1] = grayValue; // G
-          buffer[destPos + 2] = grayValue; // R
-          buffer[destPos + 3] = 0xff;      // A
+          buffer[destPos] = 0xff;      // A
+          buffer[destPos + 1] = grayValue; // R
+          buffer[destPos + 2] = grayValue; // G
+          buffer[destPos + 3] = grayValue;     // B
           processedPixels++;
         }
         
@@ -189,16 +189,25 @@ export class Capture {
     const tileWidthByteSize = tileWidth * 4;
     const srcSize = tileWidthByteSize * tileHeight;
     
-    for (let srcPos = 0; srcPos + tileWidthByteSize <= srcSize; srcPos += tileWidthByteSize) {
-      // 确保不会写入超出buffer范围的数据
-      if (destPos + tileWidthByteSize > bufferSize) {
-        console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos}`);
-        break;
+    for (let y = 0; y < tileHeight; y++) {
+      for (let x = 0; x < tileWidth; x++) {
+        const srcPos = (y * tileWidth + x) * 4;
+        
+        // 确保不会写入超出buffer范围的数据
+        if (destPos + 3 >= bufferSize || srcPos + 3 >= src.length) {
+          console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos} or srcPos: ${srcPos}`);
+          break;
+        }
+        
+        // 直接使用ARGB格式数据（Alpha, Red, Green, Blue）
+        buffer[destPos] = src[srcPos];     // A
+        buffer[destPos + 1] = src[srcPos + 1]; // R
+        buffer[destPos + 2] = src[srcPos + 2]; // G
+        buffer[destPos + 3] = src[srcPos + 3]; // B
+        
+        destPos += 4;
       }
-      
-      // 直接复制ARGB数据
-      buffer.set(src.subarray(srcPos, srcPos + tileWidthByteSize), destPos);
-      destPos += capWidthByteSize;
+      destPos += capWidthByteSize - tileWidth * 4;
     }
   }
 }
