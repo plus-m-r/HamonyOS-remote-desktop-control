@@ -98,9 +98,16 @@ public final class ScreenUtilities {
 
     public static byte[] captureColors() {
         final int[] ints = captureRGB(sharedScreenSize);
-        ByteBuffer bb = ByteBuffer.allocate(4 * ints.length);
-        bb.asIntBuffer().put(ints);
-        return bb.array();
+        byte[] bytes = new byte[4 * ints.length];
+        int byteIndex = 0;
+        for (int argb : ints) {
+            // ARGB格式：alpha, red, green, blue
+            bytes[byteIndex++] = (byte) ((argb >> 24) & 0xFF); // Alpha
+            bytes[byteIndex++] = (byte) ((argb >> 16) & 0xFF); // Red
+            bytes[byteIndex++] = (byte) ((argb >> 8) & 0xFF);  // Green
+            bytes[byteIndex++] = (byte) (argb & 0xFF);         // Blue
+        }
+        return bytes;
     }
 
 
