@@ -1,9 +1,11 @@
+
 import http from '@ohos.net.http';
 import { FileInfo } from '../../models/DeviceInfo';
 import { BusinessError } from '@ohos.base';
 import fs from '@ohos.file.fs';
 import { IFileService } from '../interfaces/IService';
 import { FileWorkerManager } from '../../utils/FileWorkerManager';
+import util from '@ohos.util';
 
 // 文件上传接口
 export interface UploadFile {
@@ -116,18 +118,16 @@ export class FileService implements IFileService {
         `Content-Type: application/octet-stream\r\n\r\n`;
       
       const footer = `\r\n--${boundary}--\r\n`;
+      const headerBytes: Uint8Array = new util.TextEncoder().encode(header);
+      const footerBytes: Uint8Array = new util.TextEncoder().encode(footer);
       
-      const encoder = new util.TextEncoder();
-      const headerArray = encoder.encodeInto(header);
-      const footerArray = encoder.encodeInto(footer);
-      
-      const totalLength = headerArray.byteLength + chunkData.byteLength + footerArray.byteLength;
+      const totalLength: number = headerBytes.byteLength + chunkData.byteLength + footerBytes.byteLength;
       const multipartData = new ArrayBuffer(totalLength);
       const view = new Uint8Array(multipartData);
       
-      view.set(headerArray, 0);
-      view.set(new Uint8Array(chunkData), headerArray.byteLength);
-      view.set(footerArray, headerArray.byteLength + chunkData.byteLength);
+      view.set(headerBytes, 0);
+      view.set(new Uint8Array(chunkData), headerBytes.byteLength);
+      view.set(footerBytes, headerBytes.byteLength + chunkData.byteLength);
 
       const response = await this.httpModule.request(
         `${this.baseUrl}/file/uploadFileChunk?md5=${encodeURIComponent(md5)}&chunkNo=${chunkNo}&fileName=${encodeURIComponent(fileName)}`,

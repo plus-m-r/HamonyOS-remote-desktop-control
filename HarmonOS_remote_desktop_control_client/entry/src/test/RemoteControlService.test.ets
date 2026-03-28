@@ -1,20 +1,20 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { RemoteControlService } from '../main/ets/services/remote/RemoteControlService';
-import { RemoteControlEvent, ConnectionState } from '../main/ets/models/DeviceInfo';
+import { RemoteControlEvent, ScreenImage, ConnectionState } from '../main/ets/models/DeviceInfo';
 import { SERVER_CONFIG } from '../main/ets/config/config';
 
 export default function remoteControlServiceTest() {
   describe('RemoteControlService测试套件', () => {
     let remoteControlService: RemoteControlService;
-    let receivedScreenData: ArrayBuffer[] = [];
+    let receivedScreenImages: ScreenImage[] = [];
     let connectionSuccessCalled = false;
     let connectionErrorCalled = false;
     let lastErrorMessage = '';
 
     // 屏幕回调函数
-    const screenCallback = (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
-      receivedScreenData.push(data);
-      console.info(`RemoteControlService Test: 收到屏幕图像，大小: ${data.byteLength}, 尺寸: ${width}x${height}`);
+    const screenCallback = (image: ScreenImage) => {
+      receivedScreenImages.push(image);
+      console.info(`RemoteControlService Test: 收到屏幕图像，大小: ${image.data.byteLength}`);
     };
 
     beforeAll(() => {
@@ -39,7 +39,7 @@ export default function remoteControlServiceTest() {
 
     beforeEach(() => {
       // 重置测试状态
-      receivedScreenData = [];
+      receivedScreenImages = [];
       connectionSuccessCalled = false;
       connectionErrorCalled = false;
       lastErrorMessage = '';
@@ -57,7 +57,7 @@ export default function remoteControlServiceTest() {
     });
 
     it('设置屏幕回调', 0, () => {
-      const newCallback = (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
+      const newCallback = (image: ScreenImage) => {
         console.info('RemoteControlService Test: 新回调函数被调用');
       };
       remoteControlService.setScreenCallback(newCallback);

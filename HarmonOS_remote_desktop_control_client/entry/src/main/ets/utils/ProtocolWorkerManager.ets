@@ -7,14 +7,15 @@ interface ProtocolTaskMessage {
   existingBuffer: ArrayBuffer;
   newData: ArrayBuffer;
 }
+interface ResultData {
+  remainingBuffer: ArrayBuffer;
+  commands: ConcreteCmd[];
+}
 
 interface ResultMessage {
   type: 'result';
   success: boolean;
-  data?: {
-    remainingBuffer: ArrayBuffer;
-    commands: ConcreteCmd[];
-  };
+  data?: ResultData;
   error?: string;
 }
 
@@ -64,7 +65,7 @@ export class ProtocolWorkerManager {
    * @param newData 新接收的数据
    * @returns Promise<{remainingBuffer: ArrayBuffer, commands: ConcreteCmd[]}>
    */
-  async processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer): Promise<{ remainingBuffer: ArrayBuffer; commands: ConcreteCmd[] }> {
+  async processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer): Promise<ResultData> {
     return new Promise((resolve, reject) => {
       if (!this.worker) {
         reject(new Error('Worker not initialized'));

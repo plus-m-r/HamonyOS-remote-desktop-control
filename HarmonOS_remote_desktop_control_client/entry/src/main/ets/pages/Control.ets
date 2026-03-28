@@ -1,7 +1,8 @@
 // 远程控制页面 - 实现无感文件传输和剪贴板同步
 import { ServiceProvider } from '../di/ServiceProvider';
 import { AppStateManager } from '../state/AppStateManager';
-import { promptAction, router, GestureGroup, GestureMode, PanGesture, PinchGesture, GestureEvent, ImageFit, Alignment, DragEvent } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
+
 import hilog from '@ohos.hilog';
 import { AppState } from '../state/AppStateManager';
 import { ScreenImage, ConnectionState } from '../models/DeviceInfo';
@@ -38,7 +39,7 @@ struct Control {
   @State lastTouchX: number = 0;
   @State lastTouchY: number = 0;
   @State screenImage: image.PixelMap | null = null;
-  @State scale: number = 1.0;
+  @State currentScale: number = 1.0;
   @State lastScale: number = 1.0;
 
   private remoteControlService = ServiceProvider.remoteControlService;
@@ -55,17 +56,6 @@ struct Control {
       });
     } catch (error) {
       hilog.error(DOMAIN, TAG, '显示Toast失败: %{public}s', JSON.stringify(error));
-    }
-  }
-
-  private getWindowHeight(): number {
-    try {
-      const uiContext = this.getUIContext();
-      const windowSize = uiContext.getWindowProperties();
-      return windowSize.height;
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, '获取窗口高度失败: %{public}s', JSON.stringify(error));
-      return 1080; // 默认值
     }
   }
 
@@ -304,20 +294,14 @@ struct Control {
     
     // 设置长按定时器，500ms后认为是长按
     this.longPressTimer = setTimeout(() => {
-      // 检查是否在屏幕底部20%区域内（右键区域）
-      const screenHeight = this.getWindowHeight();
-      const isInRightClickArea = event.offsetY > screenHeight * 0.8;
-      
-      if (isInRightClickArea) {
-        this.isLongPress = true;
-        // 发送鼠标右键点击命令
-        this.remoteControlService.sendMouseControl(
-          event.offsetX,
-          event.offsetY,
-          2, // 2表示右键点击
-          undefined
-        );
-      }
+      this.isLongPress = true;
+      // 发送鼠标右键点击命令
+      this.remoteControlService.sendMouseControl(
+        event.offsetX,
+        event.offsetY,
+        2, // 2表示右键点击
+        undefined
+      );
     }, 500);
   }
 
@@ -363,7 +347,7 @@ struct Control {
             .width('100%')
             .height('100%')
             .objectFit(ImageFit.Contain)
-            .scale({ x: this.scale, y: this.scale })
+            .scale({ x: this.currentScale, y: this.currentScale })
         } else {
           // 显示默认提示
           Text('远程屏幕')
@@ -408,15 +392,15 @@ struct Control {
             }),
           PinchGesture()
             .onActionStart(() => {
-              this.lastScale = this.scale;
+              this.lastScale = this.currentScale;
             })
             .onActionUpdate((event: GestureEvent) => {
-              this.scale = this.lastScale * event.scale;
+              this.currentScale = this.lastScale * event.scale;
               // 限制缩放范围，防止过度缩放
-              this.scale = Math.max(0.1, Math.min(5.0, this.scale));
+              this.currentScale = Math.max(0.1, Math.min(5.0, this.currentScale));
             })
             .onActionEnd(() => {
-              this.lastScale = this.scale;
+              this.lastScale = this.currentScale;
             }),
           PanGesture({ distance: 1, fingers: 3 })
             .onActionEnd((event: GestureEvent) => {

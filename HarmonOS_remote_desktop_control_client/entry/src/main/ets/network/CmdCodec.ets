@@ -1293,16 +1293,13 @@ export class CmdCodec {
       const compressionLevel = view.getInt32(4, false);
 
       // 将数字转换为CompressionMethod枚举
-      // Java端枚举：NONE=0, ZIP=1, XZ=2, ZSTD=3
       let compressionMethodEnum: CompressionMethod = CompressionMethod.ZSTD;
-      if (compressionMethod === 0) {
-        compressionMethodEnum = CompressionMethod.NONE;
-      } else if (compressionMethod === 1) {
-        compressionMethodEnum = CompressionMethod.ZIP;
+      if (compressionMethod === 1) {
+        compressionMethodEnum = CompressionMethod.ZSTD;
       } else if (compressionMethod === 2) {
         compressionMethodEnum = CompressionMethod.XZ;
       } else if (compressionMethod === 3) {
-        compressionMethodEnum = CompressionMethod.ZSTD;
+        compressionMethodEnum = CompressionMethod.ZIP;
       }
       
       // 创建命令对象
