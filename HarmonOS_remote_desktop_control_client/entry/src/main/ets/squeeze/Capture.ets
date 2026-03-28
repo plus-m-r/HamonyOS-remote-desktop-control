@@ -175,7 +175,7 @@ export class Capture {
   }
 
   /**
-   * 处理32位ARGB数据
+   * 处理32位ARGB数据 - 直接使用鸿蒙原生ARGB格式
    */
   private processArgbData(
     buffer: Uint8Array,
@@ -187,27 +187,20 @@ export class Capture {
     bufferSize: number
   ): void {
     const tileWidthByteSize = tileWidth * 4;
-    const srcSize = tileWidthByteSize * tileHeight;
     
     for (let y = 0; y < tileHeight; y++) {
-      for (let x = 0; x < tileWidth; x++) {
-        const srcPos = (y * tileWidth + x) * 4;
-        
-        // 确保不会写入超出buffer范围的数据
-        if (destPos + 3 >= bufferSize || srcPos + 3 >= src.length) {
-          console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos} or srcPos: ${srcPos}`);
-          break;
-        }
-        
-        // 直接使用ARGB格式数据（Alpha, Red, Green, Blue）
-        buffer[destPos] = src[srcPos];     // A
-        buffer[destPos + 1] = src[srcPos + 1]; // R
-        buffer[destPos + 2] = src[srcPos + 2]; // G
-        buffer[destPos + 3] = src[srcPos + 3]; // B
-        
-        destPos += 4;
+      const srcPos = y * tileWidthByteSize;
+      const rowSize = Math.min(tileWidthByteSize, src.length - srcPos);
+      
+      // 确保不会写入超出buffer范围的数据
+      if (destPos + rowSize > bufferSize) {
+        console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos}`);
+        break;
       }
-      destPos += capWidthByteSize - tileWidth * 4;
+      
+      // 直接批量复制ARGB数据（Alpha, Red, Green, Blue）
+      buffer.set(src.subarray(srcPos, srcPos + rowSize), destPos);
+      destPos += capWidthByteSize;
     }
   }
 }
