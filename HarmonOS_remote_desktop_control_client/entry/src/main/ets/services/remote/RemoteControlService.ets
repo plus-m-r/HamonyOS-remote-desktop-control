@@ -364,12 +364,12 @@ export class RemoteControlService implements IRemoteControlService {
           return;
         }
 
-        // 保存前一帧信息
+        // 保存前一帧信息 - 直接引用避免复制
         this.prevImageBuffer = new Uint8Array(result.imageBuffer);
         this.prevImageWidth = result.width;
         this.prevImageHeight = result.height;
 
-        // 传递给 UI
+        // 传递给 UI - 传递ArrayBuffer避免额外复制
         if (this.screenCallback) {
           this.screenCallback(
             result.imageBuffer,

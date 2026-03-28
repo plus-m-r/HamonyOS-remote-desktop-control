@@ -1,4 +1,9 @@
 import { CaptureTile } from './CaptureTile';
+import { BufferPool } from '../utils/ObjectPool';
+import { logManager } from '../utils/LogManager';
+
+const PERF_DOMAIN = 0xFF00;
+const PERF_TAG = 'CapturePerf';
 
 export class Capture {
   readonly id: number;
@@ -36,12 +41,13 @@ export class Capture {
   createImageBuffer(prevBuffer: Uint8Array | null, prevWidth: number, prevHeight: number): Uint8Array {
     const capWidth = this.width;
     const capHeight = this.height;
+    const startTime = Date.now();
     
-    console.log(`[步骤7-图像组装] 开始组装图像, 尺寸: ${capWidth}x${capHeight}, dirty tiles数量: ${this.dirtyTiles.length}`);
+    logManager.consoleLog(`[图像组装] 开始, 尺寸: ${capWidth}x${capHeight}, tiles: ${this.dirtyTiles.length}`);
     
     // 安全检查：确保宽度和高度是合理的
     if (capWidth <= 0 || capHeight <= 0 || capWidth > 10000 || capHeight > 10000) {
-      console.error(`Capture: Invalid dimensions: ${capWidth}x${capHeight}`);
+      logManager.error(PERF_DOMAIN, PERF_TAG, 'Invalid dimensions: %{public}dx%{public}d', capWidth, capHeight);
       return new Uint8Array(0);
     }
     
@@ -49,19 +55,21 @@ export class Capture {
     
     // 安全检查：确保bufferSize不会溢出
     if (bufferSize > 100000000) { // 100MB限制
-      console.error(`Capture: Buffer size too large: ${bufferSize}`);
+      logManager.error(PERF_DOMAIN, PERF_TAG, 'Buffer size too large: %{public}d', bufferSize);
       return new Uint8Array(0);
     }
     
-    console.log(`[步骤7-图像组装] 缓冲区大小: ${bufferSize}字节 (${bufferSize / 4}像素)`);
-    
     let buffer: Uint8Array;
+    const bufferPool = BufferPool.getInstance();
+    
+    // 优先使用对象池，其次复用前一帧缓冲区
     if (prevBuffer !== null && capWidth === prevWidth && capHeight === prevHeight && prevBuffer.length === bufferSize) {
       buffer = prevBuffer;
-      console.log(`[步骤7-图像组装] 复用前一帧缓冲区`);
+      logManager.consoleLog('[图像组装] 复用前一帧缓冲区');
     } else {
-      buffer = new Uint8Array(bufferSize);
-      console.log(`[步骤7-图像组装] 创建新缓冲区`);
+      // 使用对象池获取缓冲区
+      buffer = bufferPool.acquireBuffer(bufferSize);
+      logManager.consoleLog(`[图像组装] 从对象池获取缓冲区, 大小: ${bufferSize}`);
     }
 
     const capWidthByteSize = capWidth * 4;
@@ -74,7 +82,6 @@ export class Capture {
       tile !== null && tile !== undefined && tile.capture !== null && 
       tile.capture.size() === tile.width * tile.height
     );
-    console.log(`[步骤7-图像组装] 图像格式: ${isGray ? '灰度' : 'ARGB彩色'}`);
     
     for (const tile of this.dirtyTiles) {
       if (tile === null || tile === undefined || tile.capture === null) {
@@ -88,7 +95,7 @@ export class Capture {
       
       // 安全检查：确保tile位置在有效范围内
       if (tile.x < 0 || tile.y < 0 || tile.x >= capWidth || tile.y >= capHeight) {
-        console.error(`Capture: Tile position out of bounds: (${tile.x}, ${tile.y})`);
+        logManager.error(PERF_DOMAIN, PERF_TAG, 'Tile position out of bounds: (%{public}d, %{public}d)', tile.x, tile.y);
         continue;
       }
       
@@ -96,17 +103,15 @@ export class Capture {
       
       // 安全检查：确保destPos在有效范围内
       if (destPos < 0 || destPos >= bufferSize) {
-        console.error(`Capture: Destination position out of bounds: ${destPos}`);
+        logManager.error(PERF_DOMAIN, PERF_TAG, 'Destination position out of bounds: %{public}d', destPos);
         continue;
       }
       
       // 安全检查：确保数据长度在合理范围内
       if (src.length === 0) {
-        console.warn(`Capture: Empty data for tile`);
+        logManager.warn(PERF_DOMAIN, PERF_TAG, 'Empty data for tile');
         continue;
       }
-      
-      console.log(`[步骤7-图像组装] 处理tile ${processedTiles}, 位置: (${tile.x},${tile.y}), 尺寸: ${tileWidth}x${tileHeight}, 数据大小: ${src.length}字节`);
       
       // 根据数据大小判断处理方式
       if (isGray) {
@@ -117,7 +122,14 @@ export class Capture {
       processedTiles++;
     }
 
-    console.log(`[步骤7-图像组装] 组装完成, 处理tiles: ${processedTiles}, 跳过tiles: ${skippedTiles}`);
+    const elapsedTime = Date.now() - startTime;
+    logManager.consoleLog(`[图像组装] 完成, tiles: ${processedTiles}/${skippedTiles}, 耗时: ${elapsedTime}ms`);
+    
+    // 性能警告：如果处理时间超过16ms（60fps阈值）
+    if (elapsedTime > 16) {
+      logManager.warn(PERF_DOMAIN, PERF_TAG, 'Image assembly slow: %{public}dms for %{public}dx%{public}d', elapsedTime, capWidth, capHeight);
+    }
+    
     return buffer;
   }
 
