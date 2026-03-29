@@ -1,35 +1,38 @@
-// entry/src/main/ets/di/factories/ClipboardServiceFactory.ts
+// entry/src/main/ets/di/factories/ClipboardServiceFactory.ets
+// 剪贴板服务工厂 - 创建 IClipboardService 实例
+
 import { ClipboardService } from '../../services/clipboard/ClipboardService';
-import { SERVER_CONFIG } from '../../config/config';
+import { IClipboardService } from '../../services/interfaces/IClipboardService';
+import { configCenter } from '../../config/config';
+import { HttpRepositoryImpl } from '../../repository/HttpRepositoryImpl';
 
 /**
  * 剪贴板服务工厂
- * 负责创建和配置ClipboardService实例
+ * 负责创建和配置 ClipboardService 实例
+ * 返回 IClipboardService 接口类型
  */
 export class ClipboardServiceFactory {
   /**
    * 创建剪贴板服务实例
-   * @returns ClipboardService实例
+   * @returns IClipboardService 实例
    */
-  static create(): ClipboardService {
-    // 构建基础URL
-    const baseUrl = `http://${SERVER_CONFIG.host}:${SERVER_CONFIG.httpPort}${SERVER_CONFIG.contextPath}`;
+  static create(): IClipboardService {
+    // 从配置中心获取基础 URL
+    const baseUrl = configCenter.getHttpUrl();
+
+    // 创建 HTTP 仓库
+    const httpRepository = new HttpRepositoryImpl();
+    httpRepository.setBaseUrl(baseUrl);
 
     // 创建服务实例
-    const service = new ClipboardService(baseUrl);
+    const service = new ClipboardService(httpRepository, {
+      baseUrl,
+      syncInterval: 1000,
+      maxTextLength: 10000
+    });
 
-    // 配置服务
-    ClipboardServiceFactory.configure(service);
+    console.info('ClipboardServiceFactory: Service created');
 
     return service;
-  }
-
-  /**
-   * 配置剪贴板服务
-   * @param service ClipboardService实例
-   */
-  private static configure(service: ClipboardService): void {
-    // 可以在这里添加额外的配置
-    console.info('ClipboardServiceFactory: Service configured');
   }
 }

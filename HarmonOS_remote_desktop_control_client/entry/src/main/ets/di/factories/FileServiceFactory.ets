@@ -1,35 +1,39 @@
-// entry/src/main/ets/di/factories/FileServiceFactory.ts
+// entry/src/main/ets/di/factories/FileServiceFactory.ets
+// 文件服务工厂 - 创建 IFileService 实例
+
 import { FileService } from '../../services/file/FileService';
-import { SERVER_CONFIG } from '../../config/config';
+import { IFileService } from '../../services/interfaces/IFileService';
+import { configCenter } from '../../config/config';
+import { HttpRepositoryImpl } from '../../repository/HttpRepositoryImpl';
 
 /**
  * 文件服务工厂
- * 负责创建和配置FileService实例
+ * 负责创建和配置 FileService 实例
+ * 返回 IFileService 接口类型
  */
 export class FileServiceFactory {
   /**
    * 创建文件服务实例
-   * @returns FileService实例
+   * @returns IFileService 实例
    */
-  static create(): FileService {
-    // 构建基础URL
-    const baseUrl = `http://${SERVER_CONFIG.host}:${SERVER_CONFIG.httpPort}${SERVER_CONFIG.contextPath}`;
+  static create(): IFileService {
+    // 从配置中心获取基础 URL
+    const baseUrl = configCenter.getHttpUrl();
+
+    // 创建 HTTP 仓库
+    const httpRepository = new HttpRepositoryImpl();
+    httpRepository.setBaseUrl(baseUrl);
 
     // 创建服务实例
-    const service = new FileService(baseUrl);
+    const service = new FileService(httpRepository, {
+      baseUrl,
+      chunkSize: 1024 * 1024, // 1MB
+      maxConcurrentUploads: 3,
+      maxFileSize: 1024 * 1024 * 1024 // 1GB
+    });
 
-    // 配置服务
-    FileServiceFactory.configure(service);
+    console.info('FileServiceFactory: Service created');
 
     return service;
-  }
-
-  /**
-   * 配置文件服务
-   * @param service FileService实例
-   */
-  private static configure(service: FileService): void {
-    // 可以在这里添加额外的配置
-    console.info('FileServiceFactory: Service configured');
   }
 }

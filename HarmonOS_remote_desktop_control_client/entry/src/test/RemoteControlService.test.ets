@@ -1,7 +1,7 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { RemoteControlService } from '../main/ets/services/remote/RemoteControlService';
 import { RemoteControlEvent, ScreenImage, ConnectionState } from '../main/ets/models/DeviceInfo';
-import { SERVER_CONFIG } from '../main/ets/config/config';
+import { configCenter } from '../main/ets/config/config';
 
 export default function remoteControlServiceTest() {
   describe('RemoteControlService测试套件', () => {
@@ -18,10 +18,12 @@ export default function remoteControlServiceTest() {
     };
 
     beforeAll(() => {
+      // 使用配置中心获取服务器配置
+      const serverConfig = configCenter.getServerConfig();
       // 初始化服务
       remoteControlService = new RemoteControlService(
-        SERVER_CONFIG.host,
-        SERVER_CONFIG.tcpPort,
+        serverConfig.host,
+        serverConfig.tcpPort,
         screenCallback
       );
       console.info('RemoteControlService Test: 初始化完成');

@@ -1,11 +1,12 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { FileService } from '../main/ets/services/file/FileService';
-import { SERVER_CONFIG } from '../main/ets/config/config';
+import { configCenter } from '../main/ets/config/config';
 
 export default function fileServiceTest() {
   describe('FileService测试套件', () => {
     let fileService: FileService;
-    const baseUrl = `http://${SERVER_CONFIG.host}:${SERVER_CONFIG.httpPort}${SERVER_CONFIG.contextPath}`;
+    // 使用配置中心获取基础URL
+    const baseUrl = configCenter.getHttpUrl();
     const testMd5 = 'd41d8cd98f00b204e9800998ecf8427e'; // 空字符串的MD5
     const testFileInfoId = 'test-file-info-001';
 

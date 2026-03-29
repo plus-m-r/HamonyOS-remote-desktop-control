@@ -1,44 +1,58 @@
-// entry/src/main/ets/di/factories/RemoteControlServiceFactory.ts
+// entry/src/main/ets/di/factories/RemoteControlServiceFactory.ets
+// 远程控制服务工厂 - 创建 IRemoteControlService 实例
+
 import { RemoteControlService } from '../../services/remote/RemoteControlService';
-import { SERVER_CONFIG } from '../../config/config';
-import { AppStateManager } from '../../state/AppStateManager';
+import { 
+  IRemoteControlService, 
+  RemoteControlServiceConfig, 
+  RemoteControlServiceDependencies 
+} from '../../services/interfaces/IRemoteControlService';
+import { configCenter } from '../../config/config';
+import { TcpRepositoryImpl } from '../../repository/TcpRepositoryImpl';
+import { WorkerRepositoryImpl } from '../../repository/WorkerRepositoryImpl';
+import { HeartbeatManager } from '../../services/heartbeat/HeartbeatManager';
 
 /**
  * 远程控制服务工厂
- * 负责创建和配置RemoteControlService实例
+ * 负责创建和配置 RemoteControlService 实例
+ * 返回 IRemoteControlService 接口类型
  */
 export class RemoteControlServiceFactory {
   /**
    * 创建远程控制服务实例
-   * @param screenCallback 屏幕回调函数
-   * @returns RemoteControlService实例
+   * @returns IRemoteControlService 实例
    */
-  static create(screenCallback?: (data: ArrayBuffer, width: number, height: number, timestamp: number) => void): RemoteControlService {
-    // 如果没有提供屏幕回调，使用默认回调
-    const defaultCallback = screenCallback || ((data: ArrayBuffer, width: number, height: number, timestamp: number) => {
-      // 更新全局状态
-      AppStateManager.setScreenData(data, width, height, timestamp);
+  static create(): IRemoteControlService {
+    // 从配置中心获取服务器配置
+    const serverConfig = configCenter.getServerConfig();
+
+    // 创建依赖
+    const tcpRepository = new TcpRepositoryImpl();
+    const workerRepository = new WorkerRepositoryImpl();
+    const heartbeatManager = new HeartbeatManager({
+      interval: 30000, // 30秒心跳间隔
+      timeout: 10000   // 10秒超时
     });
 
     // 创建服务实例
-    const service = new RemoteControlService(
-      SERVER_CONFIG.host,
-      SERVER_CONFIG.tcpPort,
-      defaultCallback
-    );
+    const config: RemoteControlServiceConfig = {
+      host: serverConfig.host,
+      port: serverConfig.tcpPort,
+      maxReconnectAttempts: 3,
+      reconnectDelay: 2000,
+      heartbeatInterval: 30000
+    };
 
-    // 配置服务
-    RemoteControlServiceFactory.configure(service);
+    const dependencies: RemoteControlServiceDependencies = {
+      tcpRepository,
+      workerRepository,
+      heartbeatManager
+    };
 
+    const service = new RemoteControlService(config, dependencies);
+
+    console.info('RemoteControlServiceFactory: Service created');
+    
     return service;
-  }
-
-  /**
-   * 配置远程控制服务
-   * @param service RemoteControlService实例
-   */
-  private static configure(service: RemoteControlService): void {
-    // 可以在这里添加额外的配置
-    console.info('RemoteControlServiceFactory: Service configured');
   }
 }

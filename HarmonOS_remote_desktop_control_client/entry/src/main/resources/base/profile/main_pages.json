@@ -1,7 +1,6 @@
 {
   "src": [
     "pages/Index",
-    "pages/ConnectionTest",
     "pages/Control",
     "pages/Settings"
   ]

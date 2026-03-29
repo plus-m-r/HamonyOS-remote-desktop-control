@@ -1,12 +1,13 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 import { ClipboardService } from '../main/ets/services/clipboard/ClipboardService';
 import { Clipboard } from '../main/ets/models/DeviceInfo';
-import { SERVER_CONFIG } from '../main/ets/config/config';
+import { configCenter } from '../main/ets/config/config';
 
 export default function clipboardServiceTest() {
   describe('ClipboardService测试套件', () => {
     let clipboardService: ClipboardService;
-    const baseUrl = `http://${SERVER_CONFIG.host}:${SERVER_CONFIG.httpPort}${SERVER_CONFIG.contextPath}`;
+    // 使用配置中心获取基础URL
+    const baseUrl = configCenter.getHttpUrl();
     const testDeviceCode = 'TEST-DEVICE-001';
 
     beforeAll(() => {

@@ -11,10 +11,12 @@ interface CaptureTaskMessage {
     imageData: ArrayBuffer | string;
     compressionMethodOrdinal: number;
   };
+  taskId: number;
 }
 
 interface ResultMessage {
   type: 'result';
+  taskId: number;
   success: boolean;
   data?: {
     imageBuffer: ArrayBuffer;
@@ -27,7 +29,7 @@ interface ResultMessage {
 // 初始化Worker
 const workerPort = worker.workerPort;
 
-// 初始化tileCache
+// 初始化tileCache（Worker 内部只初始化一次，复用）
 let tileCache: TileCache = new NullTileCache();
 
 // 处理消息
@@ -35,10 +37,13 @@ workerPort.onmessage = (message: MessageEvent) => {
   const data = message.data as CaptureTaskMessage;
   
   if (data.type === 'capture') {
+    const taskId = data.taskId;
+    
     processCaptureTask(data.task)
       .then(result => {
         const response: ResultMessage = {
           type: 'result',
+          taskId: taskId,
           success: true,
           data: result
         };
@@ -47,6 +52,7 @@ workerPort.onmessage = (message: MessageEvent) => {
       .catch(error => {
         const response: ResultMessage = {
           type: 'result',
+          taskId: taskId,
           success: false,
           error: error.message
         };

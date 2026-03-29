@@ -1,20 +1,22 @@
-
 // entry/src/main/ets/di/Injector.ets
+// 依赖注入容器 - 完全解耦版本
 
-import { RemoteControlService } from '../services/remote/RemoteControlService';
-import { ClipboardService } from '../services/clipboard/ClipboardService';
-import { FileService } from '../services/file/FileService';
+import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
+import { IFileService } from '../services/interfaces/IFileService';
+import { IClipboardService } from '../services/interfaces/IClipboardService';
 
 /**
  * 基础服务接口
+ * 所有服务都应该实现此接口
  */
 interface BaseService {
-  // 基础服务接口，所有服务都应该实现此接口
+  cleanup?(): void;
 }
 
 /**
  * 依赖注入容器
  * 实现服务的注册、解析和管理
+ * 支持接口类型注册
  */
 export class Injector {
   private static instance: Injector | null = null;
@@ -33,6 +35,7 @@ export class Injector {
     }
     return Injector.instance;
   }
+
   /**
    * 注册服务
    * @param key 服务键
@@ -100,8 +103,16 @@ export class Injector {
    * 清理所有服务
    */
   clear(): void {
+    // 调用所有服务的 cleanup 方法
+    this.services.forEach(service => {
+      if (service.cleanup) {
+        service.cleanup();
+      }
+    });
+    
     this.services.clear();
     this.factories.clear();
+    this.isInitialized = false;
   }
 
   /**
@@ -126,27 +137,38 @@ export class Injector {
   private async initializeFactories(): Promise<void> {
     try {
       // 动态导入服务工厂
-      const remoteControlModule = await import('./factories/RemoteControlServiceFactory.ets');
-      const clipboardModule = await import('./factories/ClipboardServiceFactory.ets');
-      const fileModule = await import('./factories/FileServiceFactory.ets');
+      const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
+      const clipboardModule = await import('./factories/ClipboardServiceFactory');
+      const fileModule = await import('./factories/FileServiceFactory');
 
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
-      // 注册服务工厂
-      this.registerFactory<RemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => RemoteControlServiceFactory.create());
-      this.registerFactory<ClipboardService>(ServiceKeys.CLIPBOARD_SERVICE, () => ClipboardServiceFactory.create());
-      this.registerFactory<FileService>(ServiceKeys.FILE_SERVICE, () => FileServiceFactory.create());
+
+      // 注册服务工厂 - 返回接口类型
+      this.registerFactory<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => 
+        RemoteControlServiceFactory.create()
+      );
+      
+      this.registerFactory<IClipboardService>(ServiceKeys.CLIPBOARD_SERVICE, () => 
+        ClipboardServiceFactory.create()
+      );
+      
+      this.registerFactory<IFileService>(ServiceKeys.FILE_SERVICE, () => 
+        FileServiceFactory.create()
+      );
 
       console.info('Injector: Service factories registered');
     } catch (error) {
       console.error('Injector: Failed to initialize factories', error);
+      throw new Error(String(error));
     }
   }
 }
 
 /**
  * 依赖注入装饰器
+ * 用于标记需要注入的属性
  */
 export function Inject(key: string): (target: object, propertyKey: string) => void {
   return (target: object, propertyKey: string): void => {
@@ -156,6 +178,7 @@ export function Inject(key: string): (target: object, propertyKey: string) => vo
     console.log(`Inject decorator called for key: ${key}, property: ${propertyKey}`);
   };
 }
+
 /**
  * 服务键常量接口
  */

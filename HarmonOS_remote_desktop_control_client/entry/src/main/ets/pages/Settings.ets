@@ -1,25 +1,10 @@
 // 设置页面 - 配置文件传输和剪贴板同步选项
-import { AppStateManager } from '../state/AppStateManager';
+import { AppStateManager, getSyncSettings, setSyncSettings, SyncSettings } from '../state/AppStateManager';
 import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 
 const TAG = 'SettingsPage';
 const DOMAIN = 0x0000;
-
-export interface SyncSettings {
-  // 文件传输
-  autoUploadFiles: boolean;      // 自动上传拖拽文件
-  showFileProgress: boolean;     // 显示文件传输进度
-  
-  // 剪贴板同步
-  autoSyncClipboard: boolean;    // 自动同步剪贴板
-  syncInterval: number;          // 同步间隔（毫秒）
-  syncTextOnly: boolean;         // 仅同步文本（不包含文件）
-  
-  // 通知设置
-  showTransferNotifications: boolean;    // 显示传输通知
-  showClipboardNotifications: boolean;   // 显示剪贴板通知
-}
 
 @Entry
 @Component
@@ -65,23 +50,23 @@ struct Settings {
 
   loadSettings(): void {
     // 从AppStateManager加载设置
-    const savedSettings: SyncSettings | null = AppStateManager.getSyncSettings();
+    const savedSettings: SyncSettings | undefined = getSyncSettings();
     if (savedSettings) {
       // 手动合并设置
-      this.syncSettings.autoUploadFiles = savedSettings.autoUploadFiles ?? this.syncSettings.autoUploadFiles;
-      this.syncSettings.showFileProgress = savedSettings.showFileProgress ?? this.syncSettings.showFileProgress;
-      this.syncSettings.autoSyncClipboard = savedSettings.autoSyncClipboard ?? this.syncSettings.autoSyncClipboard;
-      this.syncSettings.syncInterval = savedSettings.syncInterval ?? this.syncSettings.syncInterval;
-      this.syncSettings.syncTextOnly = savedSettings.syncTextOnly ?? this.syncSettings.syncTextOnly;
-      this.syncSettings.showTransferNotifications = savedSettings.showTransferNotifications ?? this.syncSettings.showTransferNotifications;
-      this.syncSettings.showClipboardNotifications = savedSettings.showClipboardNotifications ?? this.syncSettings.showClipboardNotifications;
+      this.syncSettings.autoUploadFiles = savedSettings.autoUploadFiles;
+      this.syncSettings.showFileProgress = savedSettings.showFileProgress;
+      this.syncSettings.autoSyncClipboard = savedSettings.autoSyncClipboard;
+      this.syncSettings.syncInterval = savedSettings.syncInterval;
+      this.syncSettings.syncTextOnly = savedSettings.syncTextOnly;
+      this.syncSettings.showTransferNotifications = savedSettings.showTransferNotifications;
+      this.syncSettings.showClipboardNotifications = savedSettings.showClipboardNotifications;
     }
   }
 
   saveSettings(): void {
     // 保存设置到AppStateManager
-    AppStateManager.setSyncSettings(this.syncSettings);
-    
+    setSyncSettings(this.syncSettings);
+
     this.showToast('设置已保存', 2000);
   }
 

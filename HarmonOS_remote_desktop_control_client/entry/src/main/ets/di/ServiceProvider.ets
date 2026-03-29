@@ -1,43 +1,87 @@
-
 // entry/src/main/ets/di/ServiceProvider.ets
+// 服务提供者 - 完全解耦版本
+// 使用接口而非具体实现，便于测试和替换
+
 import { Injector, ServiceKeys } from './Injector';
-import { RemoteControlService } from '../services/remote/RemoteControlService';
-import { ClipboardService } from '../services/clipboard/ClipboardService';
-import { FileService } from '../services/file/FileService';
+import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
+import { IFileService } from '../services/interfaces/IFileService';
+import { IClipboardService } from '../services/interfaces/IClipboardService';
+import { IAppStateManager } from '../state/IAppStateManager';
+import { AppStateManager, MemoryStorageImpl } from '../state/AppStateManager';
 
 /**
  * 服务提供者
  * 提供便捷的服务访问方法，使用依赖注入框架
+ * 返回接口类型而非具体实现，实现完全解耦
  */
 export class ServiceProvider {
+  private static _appStateManager: IAppStateManager;
+  private static _injectorInitialized: boolean = false;
+
   /**
    * 初始化服务提供者
    */
   static async initialize(): Promise<void> {
+    if (ServiceProvider._injectorInitialized) {
+      console.info('ServiceProvider: Already initialized');
+      return;
+    }
+
     const injector = Injector.getInstance();
     await injector.initialize();
+    
+    // 初始化应用状态管理器
+    ServiceProvider._appStateManager = new AppStateManager(new MemoryStorageImpl());
+    
+    ServiceProvider._injectorInitialized = true;
     console.info('ServiceProvider: Initialized');
   }
 
   /**
-   * 获取远程控制服务
+   * 获取远程控制服务（接口类型）
    */
-  static get remoteControlService(): RemoteControlService {
-    return Injector.getInstance().resolve<RemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE);
+  static get remoteControlService(): IRemoteControlService {
+    if (!ServiceProvider._injectorInitialized) {
+      throw new Error('ServiceProvider not initialized. Call initialize() first.');
+    }
+    return Injector.getInstance().resolve<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE);
   }
 
   /**
-   * 获取剪贴板服务
+   * 获取剪贴板服务（接口类型）
    */
-  static get clipboardService(): ClipboardService {
-    return Injector.getInstance().resolve<ClipboardService>(ServiceKeys.CLIPBOARD_SERVICE);
+  static get clipboardService(): IClipboardService {
+    if (!ServiceProvider._injectorInitialized) {
+      throw new Error('ServiceProvider not initialized. Call initialize() first.');
+    }
+    return Injector.getInstance().resolve<IClipboardService>(ServiceKeys.CLIPBOARD_SERVICE);
   }
 
   /**
-   * 获取文件服务
+   * 获取文件服务（接口类型）
    */
-  static get fileService(): FileService {
-    return Injector.getInstance().resolve<FileService>(ServiceKeys.FILE_SERVICE);
+  static get fileService(): IFileService {
+    if (!ServiceProvider._injectorInitialized) {
+      throw new Error('ServiceProvider not initialized. Call initialize() first.');
+    }
+    return Injector.getInstance().resolve<IFileService>(ServiceKeys.FILE_SERVICE);
+  }
+
+  /**
+   * 获取应用状态管理器（接口类型）
+   */
+  static get appStateManager(): IAppStateManager {
+    if (!ServiceProvider._appStateManager) {
+      ServiceProvider._appStateManager = new AppStateManager(new MemoryStorageImpl());
+    }
+    return ServiceProvider._appStateManager;
+  }
+
+  /**
+   * 设置应用状态管理器（用于测试时注入 Mock）
+   */
+  static setAppStateManager(appStateManager: IAppStateManager): void {
+    ServiceProvider._appStateManager = appStateManager;
   }
 
   /**
@@ -51,12 +95,24 @@ export class ServiceProvider {
       // 清理文件服务
       ServiceProvider.fileService.cleanup();
       
+      // 清理剪贴板服务
+      ServiceProvider.clipboardService.cleanup();
+      
       // 清理依赖注入容器
       Injector.getInstance().clear();
+      
+      ServiceProvider._injectorInitialized = false;
       
       console.info('ServiceProvider: Cleanup completed');
     } catch (error) {
       console.error('ServiceProvider: Cleanup failed', error);
     }
+  }
+
+  /**
+   * 检查是否已初始化
+   */
+  static isInitialized(): boolean {
+    return ServiceProvider._injectorInitialized;
   }
 }

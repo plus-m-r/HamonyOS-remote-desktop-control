@@ -7,10 +7,12 @@ interface ProtocolTaskMessage {
   type: 'processMessage';
   existingBuffer: ArrayBuffer;
   newData: ArrayBuffer;
+  taskId: number;
 }
 
 interface ResultMessage {
   type: 'result';
+  taskId: number;
   success: boolean;
   data?: {
     remainingBuffer: ArrayBuffer;
@@ -19,7 +21,7 @@ interface ResultMessage {
   error?: string;
 }
 
-// Worker内部状态
+// Worker内部状态（复用，不随任务销毁）
 let receiveBuffer: ArrayBuffer = new ArrayBuffer(0);
 
 // 初始化Worker
@@ -28,12 +30,14 @@ const workerPort = worker.workerPort;
 // 处理消息
 workerPort.onmessage = (message: MessageEvent) => {
   const data = message.data as ProtocolTaskMessage;
+  const taskId = data.taskId;
 
   if (data.type === 'processMessage') {
     processMessage(data.existingBuffer, data.newData)
       .then(result => {
         const response: ResultMessage = {
           type: 'result',
+          taskId: taskId,
           success: true,
           data: result
         };
@@ -42,6 +46,7 @@ workerPort.onmessage = (message: MessageEvent) => {
       .catch(error => {
         const response: ResultMessage = {
           type: 'result',
+          taskId: taskId,
           success: false,
           error: error.message
         };
