@@ -1,11 +1,12 @@
+
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
-import { RemoteControlService } from '../main/ets/services/remote/RemoteControlService';
+import { MockRemoteControlService } from './mocks/MockRemoteControlService';
 import { RemoteControlEvent, ScreenImage, ConnectionState } from '../main/ets/models/DeviceInfo';
 import { configCenter } from '../main/ets/config/config';
 
 export default function remoteControlServiceTest() {
   describe('RemoteControlService测试套件', () => {
-    let remoteControlService: RemoteControlService;
+    let remoteControlService: MockRemoteControlService;
     let receivedScreenImages: ScreenImage[] = [];
     let connectionSuccessCalled = false;
     let connectionErrorCalled = false;

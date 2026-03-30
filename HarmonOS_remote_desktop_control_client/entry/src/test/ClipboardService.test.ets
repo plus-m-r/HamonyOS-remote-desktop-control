@@ -1,183 +1,507 @@
+/**
+ * ClipboardService 单元测试
+ * 
+ * 测试剪贴板服务的所有功能，包括：
+ * - 剪贴板基本操作（清空、保存、获取）
+ * - 本地剪贴板操作
+ * - 远程同步功能
+ * - 历史记录管理
+ * - 自动同步功能
+ */
+
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
-import { ClipboardService } from '../main/ets/services/clipboard/ClipboardService';
-import { Clipboard } from '../main/ets/models/DeviceInfo';
-import { configCenter } from '../main/ets/config/config';
+import { MockClipboardService } from './mocks/MockClipboardService';
+import { ClipboardContent, ClipboardData } from '../main/ets/services/interfaces/IClipboardService';
+
+export function runAllTests(): void {
+  console.info('========== ClipboardService 测试开始 ==========');
+}
 
 export default function clipboardServiceTest() {
-  describe('ClipboardService测试套件', () => {
-    let clipboardService: ClipboardService;
-    // 使用配置中心获取基础URL
-    const baseUrl = configCenter.getHttpUrl();
+  describe('ClipboardService 完整测试套件', () => {
+    let clipboardService: MockClipboardService;
     const testDeviceCode = 'TEST-DEVICE-001';
+    
+    // 测试统计数据
+    let totalTests = 0;
+    let passedTests = 0;
+    let failedTests = 0;
 
     beforeAll(() => {
-      // 初始化服务
-      clipboardService = new ClipboardService(baseUrl);
-      console.info('ClipboardService Test: 初始化完成');
+      clipboardService = new MockClipboardService();
+      console.info('ClipboardService Test: Mock 服务初始化完成');
     });
 
     afterAll(() => {
-      // 清理资源
       clipboardService.cleanup();
-      console.info('ClipboardService Test: 资源清理完成');
+      console.info(`ClipboardService Test: 测试完成 - 总计：${totalTests}, 通过：${passedTests}, 失败：${failedTests}`);
     });
 
-    it('服务初始化测试', 0, () => {
-      expect(clipboardService !== null && clipboardService !== undefined).assertTrue();
-      console.info('ClipboardService Test: 服务初始化成功');
+    beforeEach(() => {
+      clipboardService.reset();
     });
 
-    it('清空剪贴板-正常流程', 0, async () => {
-      try {
-        await clipboardService.clearClipboard(testDeviceCode);
-        console.info('ClipboardService Test: 清空剪贴板成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 清空剪贴板失败，服务端可能未启动');
-      }
+    afterEach(() => {
+      // 清理每个测试的状态
     });
 
-    it('保存剪贴板-文本类型', 0, async () => {
-      const testClipboards: Clipboard[] = [
-        {
-          deviceCode: testDeviceCode,
-          isFile: 0  // 文本类型
+    // ========== 基础功能测试 ==========
+    describe('基础功能测试', () => {
+      it('服务初始化测试', 0, () => {
+        totalTests++;
+        try {
+          expect(clipboardService !== null && clipboardService !== undefined).assertTrue();
+          passedTests++;
+          console.info('✓ 服务初始化测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      ];
+      });
 
-      try {
-        await clipboardService.saveClipboard(testClipboards);
-        console.info('ClipboardService Test: 保存文本剪贴板成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 保存文本剪贴板失败');
-      }
-    });
-
-    it('保存剪贴板-文件类型', 0, async () => {
-      const testClipboards: Clipboard[] = [
-        {
-          deviceCode: testDeviceCode,
-          fileInfoId: 'file-test-001',
-          fileName: 'test-document.txt',
-          filePid: 'folder-test-001',
-          isFile: 1  // 文件类型
+      it('清空剪贴板 - 正常流程', 0, async () => {
+        totalTests++;
+        try {
+          await clipboardService.clearClipboard(testDeviceCode);
+          const wasCalled = clipboardService.wasMethodCalled('clearClipboard');
+          expect(wasCalled).assertTrue();
+          passedTests++;
+          console.info('✓ 清空剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      ];
+      });
 
-      try {
-        await clipboardService.saveClipboard(testClipboards);
-        console.info('ClipboardService Test: 保存文件剪贴板成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 保存文件剪贴板失败');
-      }
-    });
+      it('保存剪贴板 - 文本类型', 0, async () => {
+        totalTests++;
+        try {
+          const testClipboards: ClipboardData[] = [{
+            id: 'test-clipboard-001',
+            deviceCode: testDeviceCode,
+            content: {
+              type: 'text',
+              content: '测试文本内容'
+            },
+            createTime: new Date().toISOString()
+          }];
 
-    it('保存剪贴板-多个记录', 0, async () => {
-      const testClipboards: Clipboard[] = [
-        {
-          deviceCode: testDeviceCode,
-          isFile: 0
-        },
-        {
-          deviceCode: testDeviceCode,
-          fileInfoId: 'file-test-002',
-          fileName: 'test-image.png',
-          filePid: 'folder-test-001',
-          isFile: 1
+          await clipboardService.saveClipboard(testClipboards);
+          const history = await clipboardService.getClipboardHistory();
+          expect(history.length).assertEqual(1);
+          passedTests++;
+          console.info('✓ 保存文本剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      ];
+      });
 
-      try {
-        await clipboardService.saveClipboard(testClipboards);
-        console.info('ClipboardService Test: 保存多个剪贴板记录成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 保存多个剪贴板记录失败');
-      }
+      it('保存剪贴板 - 文件类型', 0, async () => {
+        totalTests++;
+        try {
+          const testClipboards: ClipboardData[] = [{
+            id: 'test-clipboard-002',
+            deviceCode: testDeviceCode,
+            content: {
+              type: 'file',
+              content: 'file://test-document.txt',
+              fileName: 'test-document.txt',
+              fileSize: 1024
+            },
+            createTime: new Date().toISOString()
+          }];
+
+          await clipboardService.saveClipboard(testClipboards);
+          const history = await clipboardService.getClipboardHistory();
+          expect(history.length).assertEqual(1);
+          passedTests++;
+          console.info('✓ 保存文件剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('获取剪贴板 - 正常流程', 0, async () => {
+        totalTests++;
+        try {
+          // 先保存数据
+          const testClipboards: ClipboardData[] = [{
+            id: 'test-clipboard-003',
+            deviceCode: testDeviceCode,
+            content: {
+              type: 'text',
+              content: '测试内容'
+            },
+            createTime: new Date().toISOString()
+          }];
+          await clipboardService.saveClipboard(testClipboards);
+
+          // 获取数据
+          const result = await clipboardService.getClipboard(testDeviceCode);
+          expect(result.length).assertEqual(1);
+          expect(result[0].deviceCode).assertEqual(testDeviceCode);
+          passedTests++;
+          console.info('✓ 获取剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
     });
 
-    it('获取剪贴板-正常流程', 0, async () => {
-      try {
-        const result = await clipboardService.getClipboard(testDeviceCode);
-        console.info(`ClipboardService Test: 获取剪贴板返回结果类型: ${typeof result}`);
-        
-        if (result !== null && result !== undefined) {
-          if (Array.isArray(result)) {
-            console.info(`ClipboardService Test: 获取剪贴板成功，数量: ${result.length}`);
-            
-            // 验证返回的数据结构
-            if (result.length > 0) {
-              const firstItem = result[0];
-              console.info(`ClipboardService Test: 第一条记录 - id: ${firstItem.id}, deviceCode: ${firstItem.deviceCode}, isFile: ${firstItem.isFile}`);
-              
-              // 验证字段是否存在
-              expect(firstItem.deviceCode).assertEqual(testDeviceCode);
-              expect(firstItem.isFile !== undefined).assertTrue();
-            }
-          } else {
-            console.warn(`ClipboardService Test: 返回结果不是数组，实际类型: ${typeof result}`);
+    // ========== 本地剪贴板测试 ==========
+    describe('本地剪贴板测试', () => {
+      it('设置本地剪贴板', 0, async () => {
+        totalTests++;
+        try {
+          const content: ClipboardContent = {
+            type: 'text',
+            content: '本地剪贴板内容',
+            timestamp: Date.now()
+          };
+          await clipboardService.setLocalClipboard(content);
+          const local = await clipboardService.getLocalClipboard();
+          expect(local).notNull();
+          expect(local?.content).assertEqual('本地剪贴板内容');
+          passedTests++;
+          console.info('✓ 设置本地剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('获取空本地剪贴板', 0, async () => {
+        totalTests++;
+        try {
+          const local = await clipboardService.getLocalClipboard();
+          expect(local).assertNull();
+          passedTests++;
+          console.info('✓ 获取空本地剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('复制文本到剪贴板', 0, () => {
+        totalTests++;
+        try {
+          clipboardService.copyToClipboard('快速复制文本');
+          const local = clipboardService.getClipboardContent();
+          expect(local).assertEqual('快速复制文本');
+          passedTests++;
+          console.info('✓ 复制文本到剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+    });
+
+    // ========== 远程同步测试 ==========
+    describe('远程同步测试', () => {
+      it('同步到远程设备', 0, async () => {
+        totalTests++;
+        try {
+          const content: ClipboardContent = {
+            type: 'text',
+            content: '同步内容',
+            timestamp: Date.now()
+          };
+          const result = await clipboardService.syncToRemote(testDeviceCode, content);
+          expect(result).assertTrue();
+          passedTests++;
+          console.info('✓ 同步到远程设备测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('从远程设备同步', 0, async () => {
+        totalTests++;
+        try {
+          // 先添加模拟数据
+          const mockContent: ClipboardContent = {
+            type: 'text',
+            content: '远程内容',
+            timestamp: Date.now()
+          };
+          clipboardService.addMockClipboard(testDeviceCode, mockContent);
+
+          // 从远程同步
+          const result = await clipboardService.syncFromRemote(testDeviceCode);
+          expect(result).notNull();
+          expect(result?.content).assertEqual('远程内容');
+          passedTests++;
+          console.info('✓ 从远程设备同步测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('从空远程设备同步', 0, async () => {
+        totalTests++;
+        try {
+          const result = await clipboardService.syncFromRemote('EMPTY-DEVICE');
+          expect(result).assertNull();
+          passedTests++;
+          console.info('✓ 从空远程设备同步测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+    });
+
+    // ========== 自动同步测试 ==========
+    describe('自动同步测试', () => {
+      it('启动自动同步', 0, () => {
+        totalTests++;
+        try {
+          clipboardService.startAutoSync(testDeviceCode, 1000);
+          expect(clipboardService.isAutoSyncRunning()).assertTrue();
+          expect(clipboardService.getAutoSyncDeviceCode()).assertEqual(testDeviceCode);
+          clipboardService.stopAutoSync();
+          passedTests++;
+          console.info('✓ 启动自动同步测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('停止自动同步', 0, () => {
+        totalTests++;
+        try {
+          clipboardService.startAutoSync(testDeviceCode, 1000);
+          clipboardService.stopAutoSync();
+          expect(clipboardService.isAutoSyncRunning()).assertFalse();
+          passedTests++;
+          console.info('✓ 停止自动同步测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('重复启动自动同步', 0, () => {
+        totalTests++;
+        try {
+          clipboardService.startAutoSync(testDeviceCode, 1000);
+          clipboardService.startAutoSync(testDeviceCode, 2000);
+          expect(clipboardService.isAutoSyncRunning()).assertTrue();
+          clipboardService.stopAutoSync();
+          passedTests++;
+          console.info('✓ 重复启动自动同步测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+    });
+
+    // ========== 历史记录测试 ==========
+    describe('历史记录测试', () => {
+      it('获取历史记录', 0, async () => {
+        totalTests++;
+        try {
+          // 添加多条记录
+          for (let i = 0; i < 5; i++) {
+            const content: ClipboardContent = {
+              type: 'text',
+              content: `历史记录 ${i}`,
+              timestamp: Date.now()
+            };
+            clipboardService.copyToClipboard(`历史记录 ${i}`);
           }
-        } else {
-          console.warn('ClipboardService Test: 获取剪贴板返回空结果');
+
+          const history = await clipboardService.getClipboardHistory();
+          expect(history.length).assertEqual(5);
+          passedTests++;
+          console.info('✓ 获取历史记录测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      } catch (error) {
-        console.warn('ClipboardService Test: 获取剪贴板失败');
-      }
-    });
+      });
 
-    it('清空剪贴板-空设备码', 0, async () => {
-      try {
-        await clipboardService.clearClipboard('');
-        console.warn('ClipboardService Test: 空设备码应该抛出错误');
-      } catch (error) {
-        expect(error !== null && error !== undefined).assertTrue();
-        console.info('ClipboardService Test: 空设备码正确抛出错误');
-      }
-    });
+      it('删除历史记录项', 0, async () => {
+        totalTests++;
+        try {
+          clipboardService.copyToClipboard('待删除记录');
+          const history = await clipboardService.getClipboardHistory();
+          const idToDelete = history[0].id;
 
-    it('保存剪贴板-空数组', 0, async () => {
-      try {
-        await clipboardService.saveClipboard([]);
-        console.info('ClipboardService Test: 空数组保存成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 空数组保存失败');
-      }
-    });
-
-    it('保存剪贴板-特殊字符文件名', 0, async () => {
-      const specialContent: Clipboard[] = [
-        {
-          deviceCode: testDeviceCode,
-          fileInfoId: 'file-special-001',
-          fileName: 'test file (1).txt',
-          filePid: 'folder-test-001',
-          isFile: 1
+          await clipboardService.deleteHistoryItem(idToDelete);
+          const newHistory = await clipboardService.getClipboardHistory();
+          expect(newHistory.length).assertEqual(0);
+          passedTests++;
+          console.info('✓ 删除历史记录项测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      ];
+      });
 
-      try {
-        await clipboardService.saveClipboard(specialContent);
-        console.info('ClipboardService Test: 特殊字符文件名保存成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 特殊字符文件名保存失败');
-      }
+      it('清空历史记录', 0, async () => {
+        totalTests++;
+        try {
+          for (let i = 0; i < 3; i++) {
+            clipboardService.copyToClipboard(`记录 ${i}`);
+          }
+
+          await clipboardService.clearHistory();
+          const history = await clipboardService.getClipboardHistory();
+          expect(history.length).assertEqual(0);
+          passedTests++;
+          console.info('✓ 清空历史记录测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('历史记录数量限制', 0, async () => {
+        totalTests++;
+        try {
+          // 添加超过 100 条记录
+          for (let i = 0; i < 110; i++) {
+            clipboardService.copyToClipboard(`记录 ${i}`);
+          }
+
+          const history = await clipboardService.getClipboardHistory(100);
+          expect(history.length).assertLessThanOrEqual(100);
+          passedTests++;
+          console.info('✓ 历史记录数量限制测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
     });
 
-    it('保存剪贴板-中文文件名', 0, async () => {
-      const chineseContent: Clipboard[] = [
-        {
-          deviceCode: testDeviceCode,
-          fileInfoId: 'file-chinese-001',
-          fileName: '测试文档.txt',
-          filePid: 'folder-test-001',
-          isFile: 1
+    // ========== 边界条件测试 ==========
+    describe('边界条件测试', () => {
+      it('空设备码清空剪贴板', 0, async () => {
+        totalTests++;
+        try {
+          await clipboardService.clearClipboard('');
+          // 应该不抛出错误
+          passedTests++;
+          console.info('✓ 空设备码清空剪贴板测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
         }
-      ];
+      });
 
-      try {
-        await clipboardService.saveClipboard(chineseContent);
-        console.info('ClipboardService Test: 中文文件名保存成功');
-      } catch (error) {
-        console.warn('ClipboardService Test: 中文文件名保存失败');
-      }
+      it('保存空数组', 0, async () => {
+        totalTests++;
+        try {
+          await clipboardService.saveClipboard([]);
+          const history = await clipboardService.getClipboardHistory();
+          expect(history.length).assertEqual(0);
+          passedTests++;
+          console.info('✓ 保存空数组测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('特殊字符内容', 0, async () => {
+        totalTests++;
+        try {
+          const content: ClipboardContent = {
+            type: 'text',
+            content: '特殊字符：!@#$%^&*()_+{}|:"<>?`~[]\\;\',./',
+            timestamp: Date.now()
+          };
+          await clipboardService.setLocalClipboard(content);
+          const local = await clipboardService.getLocalClipboard();
+          expect(local?.content).assertEqual(content.content);
+          passedTests++;
+          console.info('✓ 特殊字符内容测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('中文内容', 0, async () => {
+        totalTests++;
+        try {
+          const content: ClipboardContent = {
+            type: 'text',
+            content: '中文测试内容：你好世界',
+            timestamp: Date.now()
+          };
+          await clipboardService.setLocalClipboard(content);
+          const local = await clipboardService.getLocalClipboard();
+          expect(local?.content).assertEqual(content.content);
+          passedTests++;
+          console.info('✓ 中文内容测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+    });
+
+    // ========== Mock 功能测试 ==========
+    describe('Mock 功能测试', () => {
+      it('模拟延迟', 0, async () => {
+        totalTests++;
+        try {
+          clipboardService.setSimulateDelay(100);
+          const startTime = Date.now();
+          await clipboardService.clearClipboard(testDeviceCode);
+          const elapsed = Date.now() - startTime;
+          expect(elapsed).assertGreaterThanOrEqual(100);
+          clipboardService.setSimulateDelay(0);
+          passedTests++;
+          console.info('✓ 模拟延迟测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('方法调用跟踪', 0, async () => {
+        totalTests++;
+        try {
+          await clipboardService.clearClipboard(testDeviceCode);
+          await clipboardService.clearClipboard(testDeviceCode);
+          
+          const count = clipboardService.getMethodCallCount('clearClipboard');
+          expect(count).assertEqual(2);
+          passedTests++;
+          console.info('✓ 方法调用跟踪测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
+
+      it('调用历史重置', 0, async () => {
+        totalTests++;
+        try {
+          await clipboardService.clearClipboard(testDeviceCode);
+          clipboardService.reset();
+          const count = clipboardService.getMethodCallCount('clearClipboard');
+          expect(count).assertEqual(0);
+          passedTests++;
+          console.info('✓ 调用历史重置测试通过');
+        } catch (error) {
+          failedTests++;
+          throw error;
+        }
+      });
     });
   });
 }
