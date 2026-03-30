@@ -2,6 +2,8 @@
   "module": {
     "name": "entry_test",
     "type": "feature",
+    "description": "$string:module_test_desc",
+    "mainElement": "TestAbility",
     "deviceTypes": [
       "phone",
       "tablet",
@@ -9,6 +11,19 @@
       "tv"
     ],
     "deliveryWithInstall": true,
-    "installationFree": false
+    "installationFree": false,
+    "abilities": [
+      {
+        "name": "TestAbility",
+        "srcEntry": "./ets/testability/TestAbility.ets",
+        "description": "$string:TestAbility_desc",
+        "icon": "$media:icon",
+        "label": "$string:TestAbility_label",
+        "launchType": "singleton",
+        "backgroundModes": [
+          "dataTransmission"
+        ]
+      }
+    ]
   }
 }
