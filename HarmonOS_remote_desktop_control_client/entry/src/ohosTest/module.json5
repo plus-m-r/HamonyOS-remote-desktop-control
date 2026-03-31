@@ -1,7 +1,8 @@
+
 {
   "module": {
     "name": "entry_test",
-    "type": "feature",
+    "type": "test",
     "description": "$string:module_test_desc",
     "mainElement": "TestAbility",
     "deviceTypes": [
@@ -19,10 +20,7 @@
         "description": "$string:TestAbility_desc",
         "icon": "$media:icon",
         "label": "$string:TestAbility_label",
-        "launchType": "singleton",
-        "backgroundModes": [
-          "dataTransmission"
-        ]
+        "launchType": "singleton"
       }
     ]
   }
