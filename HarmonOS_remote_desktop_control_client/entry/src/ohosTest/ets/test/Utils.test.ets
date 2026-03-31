@@ -10,15 +10,15 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from '@ohos/hypium';
-import { ObjectPool, BufferPool } from '../main/ets/utils/ObjectPool';
-import { XYWH, getXYWH } from '../main/ets/squeeze/XYWH';
-import { MemByteBuffer } from '../main/ets/squeeze/MemByteBuffer';
+import { ObjectPool, BufferPool } from '../../../main/ets/utils/ObjectPool';
+import { XYWH, getXYWH } from '../../../main/ets/squeeze/XYWH';
+import { MemByteBuffer } from '../../../main/ets/squeeze/MemByteBuffer';
 
 export default function utilsUnitTest() {
-  describe('工具类单元测试', () => {
+  describe('UtilsUnitTest', () => {
     
     // ========== ObjectPool 测试 ==========
-    describe('ObjectPool 对象池测试', () => {
+    describe('ObjectPoolTest', () => {
       let pool: ObjectPool<{ value: number }>;
       
       beforeAll(() => {
@@ -83,7 +83,7 @@ export default function utilsUnitTest() {
     });
     
     // ========== BufferPool 测试 ==========
-    describe('BufferPool 缓冲区池测试', () => {
+    describe('BufferPoolTest', () => {
       let bufferPool: BufferPool;
       
       beforeAll(() => {
@@ -119,7 +119,7 @@ export default function utilsUnitTest() {
     });
     
     // ========== XYWH 测试 ==========
-    describe('XYWH 坐标类测试', () => {
+    describe('XYWHTest', () => {
       it('创建 XYWH 对象', 0, () => {
         const xywh = new XYWH(10, 20, 100, 200);
         expect(xywh).notNull();
@@ -167,7 +167,7 @@ export default function utilsUnitTest() {
     });
     
     // ========== MemByteBuffer 测试 ==========
-    describe('MemByteBuffer 缓冲区测试', () => {
+    describe('MemByteBufferTest', () => {
       let buffer: MemByteBuffer;
       
       beforeEach(() => {
@@ -297,7 +297,7 @@ export default function utilsUnitTest() {
     });
     
     // ========== 综合测试 ==========
-    describe('综合测试', () => {
+    describe('IntegrationTest', () => {
       it('使用 MemByteBuffer 序列化 XYWH', 0, () => {
         const buffer = new MemByteBuffer();
         const xywh = new XYWH(100, 200, 300, 400);

@@ -7,7 +7,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 
 export default function simpleUnitTest() {
-  describe('简单单元测试', () => {
+  describe('SimpleUnitTest', () => {
     
     it('测试加法运算', 0, () => {
       const result = 2 + 3;

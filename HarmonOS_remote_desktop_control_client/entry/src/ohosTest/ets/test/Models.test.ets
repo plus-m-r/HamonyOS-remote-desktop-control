@@ -8,14 +8,14 @@
  */
 
 import { describe, it, expect } from '@ohos/hypium';
-import { CmdData } from '../main/ets/models/CmdData';
-import { CmdType, ClipboardData } from '../main/ets/models/CmdProtocol';
+import { CmdData } from '../../../main/ets/models/CmdData';
+import { CmdType, ClipboardData } from '../../../main/ets/models/CmdProtocol';
 
 export default function modelsUnitTest() {
-  describe('模型类单元测试', () => {
+  describe('ModelsUnitTest', () => {
     
     // ========== CmdData 测试 ==========
-    describe('CmdData 命令数据类测试', () => {
+    describe('CmdDataTest', () => {
       
       it('创建 CmdData 实例', 0, () => {
         const cmdData = new CmdData();
@@ -222,7 +222,7 @@ export default function modelsUnitTest() {
     });
     
     // ========== ClipboardData 测试 ==========
-    describe('ClipboardData 剪贴板数据测试', () => {
+    describe('ClipboardDataTest', () => {
       
       it('创建 ClipboardData 对象', 0, () => {
         const clipboard: ClipboardData = {
@@ -262,7 +262,7 @@ export default function modelsUnitTest() {
     });
     
     // ========== CmdType 枚举测试 ==========
-    describe('CmdType 命令类型枚举测试', () => {
+    describe('CmdTypeEnumTest', () => {
       
       it('验证命令类型值', 0, () => {
         expect(CmdType.ReqPing).assertEqual(0);
