@@ -56,7 +56,7 @@ export class LogManager {
   /**
    * 调试日志
    */
-  debug(domain: number, tag: string, format: string, ...args: unknown[]): void {
+  debug(domain: number, tag: string, format: string, ...args: Object[]): void {
     if (this.currentLevel <= LogLevel.DEBUG) {
       hilog.debug(domain, tag, format, ...args);
     }
@@ -65,7 +65,7 @@ export class LogManager {
   /**
    * 信息日志
    */
-  info(domain: number, tag: string, format: string, ...args: unknown[]): void {
+  info(domain: number, tag: string, format: string, ...args: Object[]): void {
     if (this.currentLevel <= LogLevel.INFO) {
       hilog.info(domain, tag, format, ...args);
     }
@@ -74,7 +74,7 @@ export class LogManager {
   /**
    * 警告日志
    */
-  warn(domain: number, tag: string, format: string, ...args: unknown[]): void {
+  warn(domain: number, tag: string, format: string, ...args: Object[]): void {
     if (this.currentLevel <= LogLevel.WARN) {
       hilog.warn(domain, tag, format, ...args);
     }
@@ -83,7 +83,7 @@ export class LogManager {
   /**
    * 错误日志
    */
-  error(domain: number, tag: string, format: string, ...args: unknown[]): void {
+  error(domain: number, tag: string, format: string, ...args: Object[]): void {
     if (this.currentLevel <= LogLevel.ERROR) {
       hilog.error(domain, tag, format, ...args);
     }
@@ -92,7 +92,7 @@ export class LogManager {
   /**
    * 控制台日志（仅在调试模式）
    */
-  consoleLog(message: string, ...optionalParams: unknown[]): void {
+  consoleLog(message: string, ...optionalParams: Object[]): void {
     if (this.isDebugMode) {
       console.log(message, ...optionalParams);
     }
@@ -101,7 +101,7 @@ export class LogManager {
   /**
    * 控制台错误（仅在调试模式）
    */
-  consoleError(message: string, ...optionalParams: unknown[]): void {
+  consoleError(message: string, ...optionalParams: Object[]): void {
     if (this.isDebugMode) {
       console.error(message, ...optionalParams);
     }

@@ -1,23 +1,29 @@
-import worker from '@ohos.worker';
+import worker, { MessageEvent } from '@ohos.worker';
 import { CmdCodec } from '../network/CmdCodec';
 import { ConcreteCmd } from '../models/ConcreteCmd';
 
 // 定义消息类型
-interface ProtocolTaskMessage {
-  type: 'processMessage';
+interface ProtocolTaskData {
   existingBuffer: ArrayBuffer;
   newData: ArrayBuffer;
+}
+
+interface ProtocolTaskMessage {
+  type: 'parseProtocol';
+  task: ProtocolTaskData;
   taskId: number;
 }
 
+interface ProcessMessageResult {
+  remainingBuffer: ArrayBuffer;
+  commands: Record<string, Object>[];
+}
+
 interface ResultMessage {
-  type: 'result';
+  type: 'protocolResult';
   taskId: number;
   success: boolean;
-  data?: {
-    remainingBuffer: ArrayBuffer;
-    commands: ConcreteCmd[];
-  };
+  data?: ProcessMessageResult;
   error?: string;
 }
 
@@ -28,24 +34,24 @@ let receiveBuffer: ArrayBuffer = new ArrayBuffer(0);
 const workerPort = worker.workerPort;
 
 // 处理消息
-workerPort.onmessage = (message: MessageEvent) => {
-  const data = message.data as ProtocolTaskMessage;
+workerPort.onmessage = (message: MessageEvent<ProtocolTaskMessage>) => {
+  const data: ProtocolTaskMessage = message.data;
   const taskId = data.taskId;
 
-  if (data.type === 'processMessage') {
-    processMessage(data.existingBuffer, data.newData)
+  if (data.type === 'parseProtocol') {
+    processMessage(data.task.existingBuffer, data.task.newData)
       .then(result => {
         const response: ResultMessage = {
-          type: 'result',
+          type: 'protocolResult',
           taskId: taskId,
           success: true,
           data: result
         };
         workerPort.postMessage(response);
       })
-      .catch(error => {
+      .catch((error: Error) => {
         const response: ResultMessage = {
-          type: 'result',
+          type: 'protocolResult',
           taskId: taskId,
           success: false,
           error: error.message
@@ -59,9 +65,9 @@ workerPort.onmessage = (message: MessageEvent) => {
  * 处理消息：合并缓冲区并提取命令
  * @param existingBuffer 现有缓冲区
  * @param newData 新接收的数据
- * @returns Promise<{remainingBuffer: ArrayBuffer, commands: ConcreteCmd[]}>
+ * @returns Promise<{remainingBuffer: ArrayBuffer, commands: Record<string, Object>[]}>
  */
-async function processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer): Promise<{ remainingBuffer: ArrayBuffer; commands: ConcreteCmd[] }> {
+async function processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer): Promise<ProcessMessageResult> {
   // 合并缓冲区
   const newBuffer = new ArrayBuffer(existingBuffer.byteLength + newData.byteLength);
   const newView = new Uint8Array(newBuffer);
@@ -71,8 +77,14 @@ async function processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer)
   // 提取命令
   const result = CmdCodec.extractCommands(newBuffer);
   
+  // 转换为纯对象数组
+  const commandObjects: Record<string, Object>[] = [];
+  for (let i = 0; i < result[1].length; i++) {
+    commandObjects.push(result[1][i].toJSON());
+  }
+  
   return {
     remainingBuffer: result[0],
-    commands: result[1]
+    commands: commandObjects
   };
 }

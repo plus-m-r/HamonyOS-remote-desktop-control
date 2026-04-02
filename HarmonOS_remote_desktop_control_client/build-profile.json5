@@ -7,11 +7,24 @@
         "material": {
           "certpath": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001950E5C63DC75508CA0D730F116A34B290335789FFC057EFFABF89AA1A0A8014A86BAA0DDD38",
+          "keyPassword": "0000001A4C143FBE4F0DE6B35AD12E19E5045B7AB3ABDC31D81990E66B87E704DE255E4E953691329A42",
           "profile": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p12",
-          "storePassword": "00000019B44103100ECB5397214C1600F2E3F19F45DE9293B951376E7313DF49C5FD822D5E9D85C5E8"
+          "storePassword": "0000001A8639980D06ACB51A1C142919103C69A023AB6F613C4FD6A9418A1DF4DA382F034FB758D3A218"
+        }
+      },
+      {
+        "name": "ohosTest",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\20241\\.ohos\\config\\ohosTest_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A9352EBFCE131A0B32DBE0D92E6868F35071B79246D6169151149DEF6989C1CDEC3A9FA27990E",
+          "profile": "C:\\Users\\20241\\.ohos\\config\\ohosTest_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\20241\\.ohos\\config\\ohosTest_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p12",
+          "storePassword": "0000001A4479F840AC58D05998BDDD27BA4F222F99E14918D7B8BD544FF9D4F7CEA759A33BA87A1F389B"
         }
       }
     ],
@@ -32,10 +45,13 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug",
+        "name": "debug"
       },
       {
         "name": "release"
+      },
+      {
+        "name": "test"
       }
     ]
   },

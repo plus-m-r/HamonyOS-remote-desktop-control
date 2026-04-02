@@ -4,6 +4,8 @@
 import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
 import { IFileService } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
+import { IConnectionManager } from '../services/connection/IConnectionManager';
+import { IProtocolHandler } from '../services/protocol/IProtocolHandler';
 
 /**
  * 基础服务接口
@@ -137,15 +139,28 @@ export class Injector {
   private async initializeFactories(): Promise<void> {
     try {
       // 动态导入服务工厂
+      const connectionManagerModule = await import('./factories/ConnectionManagerFactory');
+      const protocolHandlerModule = await import('./factories/ProtocolHandlerFactory');
       const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
       const clipboardModule = await import('./factories/ClipboardServiceFactory');
       const fileModule = await import('./factories/FileServiceFactory');
 
+      const ConnectionManagerFactory = connectionManagerModule.ConnectionManagerFactory;
+      const ProtocolHandlerFactory = protocolHandlerModule.ProtocolHandlerFactory;
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
 
       // 注册服务工厂 - 返回接口类型
+      // 注意：注册顺序很重要，因为 RemoteControlService 依赖于 ConnectionManager 和 ProtocolHandler
+      this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER, () => 
+        ConnectionManagerFactory.create()
+      );
+      
+      this.registerFactory<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER, () => 
+        ProtocolHandlerFactory.create()
+      );
+      
       this.registerFactory<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => 
         RemoteControlServiceFactory.create()
       );
@@ -158,7 +173,7 @@ export class Injector {
         FileServiceFactory.create()
       );
 
-      console.info('Injector: Service factories registered');
+      console.info('Injector: All service factories registered');
     } catch (error) {
       console.error('Injector: Failed to initialize factories', error);
       throw new Error(String(error));
@@ -186,8 +201,13 @@ interface ServiceKeysType {
   REMOTE_CONTROL_SERVICE: string;
   CLIPBOARD_SERVICE: string;
   FILE_SERVICE: string;
+  CONNECTION_MANAGER: string;
+  PROTOCOL_HANDLER: string;
   HTTP_CLIENT: string;
   TCP_CLIENT: string;
+  TCP_REPOSITORY: string;
+  WORKER_REPOSITORY: string;
+  HEARTBEAT_MANAGER: string;
 }
 
 /**
@@ -197,6 +217,11 @@ export const ServiceKeys: ServiceKeysType = {
   REMOTE_CONTROL_SERVICE: 'remoteControlService',
   CLIPBOARD_SERVICE: 'clipboardService',
   FILE_SERVICE: 'fileService',
+  CONNECTION_MANAGER: 'connectionManager',
+  PROTOCOL_HANDLER: 'protocolHandler',
   HTTP_CLIENT: 'httpClient',
-  TCP_CLIENT: 'tcpClient'
+  TCP_CLIENT: 'tcpClient',
+  TCP_REPOSITORY: 'tcpRepository',
+  WORKER_REPOSITORY: 'workerRepository',
+  HEARTBEAT_MANAGER: 'heartbeatManager'
 };

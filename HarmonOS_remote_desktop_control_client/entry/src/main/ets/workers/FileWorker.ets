@@ -1,4 +1,4 @@
-import worker from '@ohos.worker';
+import worker, { MessageEvent } from '@ohos.worker';
 import fs from '@ohos.file.fs';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import { util } from '@kit.ArkTS';
@@ -20,8 +20,8 @@ interface ResultMessage {
 const workerPort = worker.workerPort;
 
 // 处理消息
-workerPort.onmessage = (message: MessageEvent) => {
-  const data = message.data as FileTaskMessage;
+workerPort.onmessage = (message: MessageEvent<FileTaskMessage>) => {
+  const data: FileTaskMessage = message.data;
 
   if (data.type === 'calculateMD5') {
     calculateMD5(data.filePath)
@@ -33,7 +33,7 @@ workerPort.onmessage = (message: MessageEvent) => {
         };
         workerPort.postMessage(response);
       })
-      .catch(error => {
+      .catch((error: Error) => {
         const response: ResultMessage = {
           type: 'result',
           success: false,

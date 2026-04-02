@@ -1,3 +1,5 @@
+import { ConcreteCmd } from '../models/ConcreteCmd';
+
 /**
  * Worker 仓库接口
  * 
@@ -37,7 +39,7 @@ export interface ProtocolParseTask {
  */
 export interface ProtocolParseResult {
   remainingBuffer: ArrayBuffer;
-  commands: ArrayBuffer[]; // 简化表示，实际应为 ConcreteCmd[]
+  commands: Record<string, Object>[];
 }
 
 /**

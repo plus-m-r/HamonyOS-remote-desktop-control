@@ -39,7 +39,7 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
 
     try {
       // 创建图像处理 Worker
-      this.imageWorker = new worker.ThreadWorker('ets/utils/CaptureWorker.ets');
+      this.imageWorker = new worker.ThreadWorker('entry/ets/workers/CaptureWorker');
       this.imageWorker.onmessage = (message: WorkerMessageData) => {
         this.handleWorkerMessage(message.data);
       };
@@ -48,7 +48,7 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
       };
 
       // 创建协议解析 Worker
-      this.protocolWorker = new worker.ThreadWorker('ets/utils/ProtocolWorker.ets');
+      this.protocolWorker = new worker.ThreadWorker('entry/ets/workers/ProtocolWorker');
       this.protocolWorker.onmessage = (message: WorkerMessageData) => {
         this.handleWorkerMessage(message.data);
       };

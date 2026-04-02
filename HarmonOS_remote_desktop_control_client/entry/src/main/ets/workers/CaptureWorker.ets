@@ -1,28 +1,32 @@
-import worker from '@ohos.worker';
+import worker, { MessageEvent } from '@ohos.worker';
 import { MemByteBuffer } from '../squeeze/MemByteBuffer';
 import { Compressor, CompressionMethod } from '../squeeze/Compressor';
 import { TileCache, NullTileCache } from '../squeeze/TileCache';
 import { Capture } from '../squeeze/Capture';
 
 // 定义消息类型
+interface CaptureTask {
+  imageData: ArrayBuffer | string;
+  compressionMethodOrdinal: number;
+}
+
 interface CaptureTaskMessage {
-  type: 'capture';
-  task: {
-    imageData: ArrayBuffer | string;
-    compressionMethodOrdinal: number;
-  };
+  type: 'processImage';
+  task: CaptureTask;
   taskId: number;
 }
 
+interface ImageDataResult {
+  imageBuffer: ArrayBuffer;
+  width: number;
+  height: number;
+}
+
 interface ResultMessage {
-  type: 'result';
+  type: 'imageResult';
   taskId: number;
   success: boolean;
-  data?: {
-    imageBuffer: ArrayBuffer;
-    width: number;
-    height: number;
-  };
+  data?: ImageDataResult;
   error?: string;
 }
 
@@ -33,25 +37,25 @@ const workerPort = worker.workerPort;
 let tileCache: TileCache = new NullTileCache();
 
 // 处理消息
-workerPort.onmessage = (message: MessageEvent) => {
-  const data = message.data as CaptureTaskMessage;
+workerPort.onmessage = (message: MessageEvent<CaptureTaskMessage>) => {
+  const data: CaptureTaskMessage = message.data;
   
-  if (data.type === 'capture') {
+  if (data.type === 'processImage') {
     const taskId = data.taskId;
     
     processCaptureTask(data.task)
       .then(result => {
         const response: ResultMessage = {
-          type: 'result',
+          type: 'imageResult',
           taskId: taskId,
           success: true,
           data: result
         };
         workerPort.postMessage(response);
       })
-      .catch(error => {
+      .catch((error: Error) => {
         const response: ResultMessage = {
-          type: 'result',
+          type: 'imageResult',
           taskId: taskId,
           success: false,
           error: error.message
@@ -66,10 +70,7 @@ workerPort.onmessage = (message: MessageEvent) => {
  * @param task 捕获任务
  * @returns Promise<{imageBuffer: ArrayBuffer, width: number, height: number}>
  */
-async function processCaptureTask(task: {
-  imageData: ArrayBuffer | string;
-  compressionMethodOrdinal: number;
-}): Promise<{imageBuffer: ArrayBuffer, width: number, height: number}> {
+async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
   const imageData = task.imageData;
   const compressionMethodOrdinal = task.compressionMethodOrdinal;
   
@@ -106,9 +107,10 @@ async function processCaptureTask(task: {
   // 5. 通知缓存处理完成
   tileCache.onCaptureProcessed();
   
-  return {
+  const result: ImageDataResult = {
     imageBuffer: imageBuffer.buffer as ArrayBuffer,
     width: capture.width,
     height: capture.height
   };
+  return result;
 }

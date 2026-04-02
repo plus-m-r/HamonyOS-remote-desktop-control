@@ -4,17 +4,18 @@
 import { RemoteControlService } from '../../services/remote/RemoteControlService';
 import { 
   IRemoteControlService, 
-  RemoteControlServiceConfig, 
-  RemoteControlServiceDependencies 
+  RemoteControlServiceConfig
 } from '../../services/interfaces/IRemoteControlService';
+import { IConnectionManager } from '../../services/connection/IConnectionManager';
+import { IProtocolHandler } from '../../services/protocol/IProtocolHandler';
+import { IHeartbeatManager } from '../../services/interfaces/IHeartbeatManager';
 import { configCenter } from '../../config/config';
-import { TcpRepositoryImpl } from '../../repository/TcpRepositoryImpl';
-import { WorkerRepositoryImpl } from '../../repository/WorkerRepositoryImpl';
+import { Injector, ServiceKeys } from '../Injector';
 import { HeartbeatManager } from '../../services/heartbeat/HeartbeatManager';
 
 /**
  * 远程控制服务工厂
- * 负责创建和配置 RemoteControlService 实例
+ * 负责创建和配置 RemoteControlServiceRefactored 实例
  * 返回 IRemoteControlService 接口类型
  */
 export class RemoteControlServiceFactory {
@@ -26,30 +27,31 @@ export class RemoteControlServiceFactory {
     // 从配置中心获取服务器配置
     const serverConfig = configCenter.getServerConfig();
 
-    // 创建依赖
-    const tcpRepository = new TcpRepositoryImpl();
-    const workerRepository = new WorkerRepositoryImpl();
+    // 从 DI 容器获取依赖
+    const injector = Injector.getInstance();
+    const connectionManager = injector.resolve<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER);
+    const protocolHandler = injector.resolve<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER);
     const heartbeatManager = new HeartbeatManager({
-      interval: 30000, // 30秒心跳间隔
-      timeout: 10000   // 10秒超时
+      interval: 3000,
+      timeout: 5000
     });
 
-    // 创建服务实例
+    // 创建服务配置
     const config: RemoteControlServiceConfig = {
       host: serverConfig.host,
       port: serverConfig.tcpPort,
       maxReconnectAttempts: 3,
       reconnectDelay: 2000,
-      heartbeatInterval: 30000
+      heartbeatInterval: 3000
     };
 
-    const dependencies: RemoteControlServiceDependencies = {
-      tcpRepository,
-      workerRepository,
+    // 创建服务实例
+    const service = new RemoteControlService(
+      config,
+      connectionManager,
+      protocolHandler,
       heartbeatManager
-    };
-
-    const service = new RemoteControlService(config, dependencies);
+    );
 
     console.info('RemoteControlServiceFactory: Service created');
     

@@ -24,7 +24,7 @@ import {
  */
 const DEFAULT_CONFIG: AppConfig = {
   server: {
-    host: '10.246.255.247',
+    host: '10.199.86.247',
     tcpPort: 54321,
     httpPort: 12345,
     contextPath: '/remote-desktop-control'
@@ -98,7 +98,7 @@ interface EnvironmentConfigs {
 const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   development: {
     server: {
-      host: '127.0.0.1',
+      host: '10.199.86.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -136,6 +136,12 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
     }
   },
   production: {
+    server: {
+      host: '10.199.86.247',
+      tcpPort: 54321,
+      httpPort: 12345,
+      contextPath: '/remote-desktop-control'
+    },
     log: {
       level: 'warn',
       enableConsole: false,

@@ -3,9 +3,6 @@
 
 import { ConnectionState, RemoteControlEvent, DeviceValidationResult } from '../../models/DeviceInfo';
 import { ClientInfoCallback, ConnectionCallback, ClipboardCallback } from '../../models/CmdProtocol';
-import { ITcpRepository } from '../../repository/ITcpRepository';
-import { IWorkerRepository } from '../../repository/IWorkerRepository';
-import { IHeartbeatManager } from './IHeartbeatManager';
 
 /**
  * 远程控制服务配置
@@ -16,15 +13,6 @@ export interface RemoteControlServiceConfig {
   maxReconnectAttempts: number;
   reconnectDelay: number;
   heartbeatInterval: number;
-}
-
-/**
- * 远程控制服务依赖
- */
-export interface RemoteControlServiceDependencies {
-  tcpRepository: ITcpRepository;
-  workerRepository: IWorkerRepository;
-  heartbeatManager: IHeartbeatManager;
 }
 
 /**

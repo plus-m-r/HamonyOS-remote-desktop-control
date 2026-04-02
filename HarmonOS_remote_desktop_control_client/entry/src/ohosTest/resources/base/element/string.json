@@ -11,6 +11,10 @@
     {
       "name": "TestAbility_label",
       "value": "测试"
+    },
+    {
+      "name": "test_runner_label",
+      "value": "测试运行器"
     }
   ]
 }

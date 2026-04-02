@@ -1,4 +1,4 @@
-import worker from '@ohos.worker';
+import worker, { MessageEvent } from '@ohos.worker';
 
 // 定义消息类型
 interface HeartbeatTickMessage {
@@ -7,6 +7,10 @@ interface HeartbeatTickMessage {
 }
 
 type WorkerMessage = HeartbeatTickMessage;
+
+interface WorkerMessageData {
+  data: WorkerMessage;
+}
 
 /**
  * 心跳 Worker 管理器
@@ -53,10 +57,10 @@ export class HeartbeatWorkerManager {
 
     try {
       // 创建 Worker（只创建一次）
-      this.worker = new worker.ThreadWorker('ets/utils/HeartbeatWorker.ets');
+      this.worker = new worker.ThreadWorker('entry/ets/workers/HeartbeatWorker');
       
       // 设置消息接收回调
-      this.worker.onmessage = (message: Object) => {
+      this.worker.onmessage = (message: MessageEvent<WorkerMessageData>) => {
         this.handleWorkerMessage(message);
       };
 
@@ -81,8 +85,8 @@ export class HeartbeatWorkerManager {
   /**
    * 处理 Worker 消息
    */
-  private handleWorkerMessage(message: Object): void {
-    const data = (message as { data: WorkerMessage }).data;
+  private handleWorkerMessage(message: MessageEvent<WorkerMessageData>): void {
+    const data = message.data.data;
 
     if (data.type === 'tick') {
       // Worker 发送的心跳 tick，通知主线程发送实际的心跳包

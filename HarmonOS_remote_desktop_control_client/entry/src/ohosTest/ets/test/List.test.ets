@@ -1,11 +1,17 @@
-import abilityTest from './Ability.test';
-import simpleUnitTest from './SimpleUnitTest.test';
-import utilsUnitTest from './Utils.test';
-import modelsUnitTest from './Models.test';
+import UtilsUnitTest from './utils/Utils.test';
+import CaptureWorkerTest from './utils/CaptureWorker.test';
+import ModelsUnitTest from './models/Models.test';
+import ConfigCenterTest from './config/ConfigCenter.test';
+import ModelsExtendedTest from './models/ModelsExtended.test';
+import ServicesInterfacesTest from './services/ServicesInterfaces.test';
+import AppStateManagerTest from './state/AppStateManager.test';
 
 export default function testsuite() {
-  abilityTest();
-  simpleUnitTest();
-  utilsUnitTest();
-  modelsUnitTest();
+  UtilsUnitTest();
+  CaptureWorkerTest();
+  ModelsUnitTest();
+  ConfigCenterTest();
+  ModelsExtendedTest();
+  ServicesInterfacesTest();
+  AppStateManagerTest();
 }

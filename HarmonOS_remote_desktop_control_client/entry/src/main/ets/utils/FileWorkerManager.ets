@@ -1,4 +1,4 @@
-import worker from '@ohos.worker';
+import worker, { MessageEvent } from '@ohos.worker';
 
 // 定义消息类型
 interface FileTaskMessage {
@@ -14,7 +14,7 @@ interface ResultMessage {
 }
 
 // 定义Worker消息接口
-interface WorkerMessage {
+interface WorkerMessageData {
   data: ResultMessage;
 }
 
@@ -29,8 +29,8 @@ export class FileWorkerManager {
    */
   init(): void {
     try {
-      this.worker = new worker.ThreadWorker('ets/utils/FileWorker.ets');
-      this.worker.onmessage = (message: Object) => {
+      this.worker = new worker.ThreadWorker('entry/ets/workers/FileWorker');
+      this.worker.onmessage = (message: MessageEvent<WorkerMessageData>) => {
         this.handleWorkerMessage(message);
       };
       this.worker.onerror = (error: Object) => {
@@ -45,8 +45,8 @@ export class FileWorkerManager {
    * 处理Worker消息
    * @param message 消息事件
    */
-  private handleWorkerMessage(message: Object): void {
-    const data = (message as WorkerMessage).data;
+  private handleWorkerMessage(message: MessageEvent<WorkerMessageData>): void {
+    const data = message.data.data;
 
     if (data.type === 'result') {
       // 结果通过Promise返回，这里不需要额外处理
@@ -72,8 +72,8 @@ export class FileWorkerManager {
       };
 
       // 设置一次性消息处理器
-      const messageHandler = (msg: Object) => {
-        const data = (msg as WorkerMessage).data;
+      const messageHandler = (msg: MessageEvent<WorkerMessageData>) => {
+        const data = msg.data.data;
         if (data.type === 'result') {
           this.worker?.off('message', messageHandler);
           if (data.success && data.data) {

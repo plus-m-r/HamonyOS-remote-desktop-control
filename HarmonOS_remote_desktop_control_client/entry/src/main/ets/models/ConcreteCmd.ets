@@ -73,4 +73,11 @@ export class ConcreteCmd implements Cmd {
     
     return result;
   }
+
+  static fromObject(obj: Record<string, Object>): ConcreteCmd {
+    const type = obj['type'] as CmdType;
+    const id = String(obj['id'] ?? '');
+    const data = CmdData.fromObject(obj);
+    return new ConcreteCmd(type, data, id);
+  }
 }

@@ -1,6 +1,14 @@
 {
   "apiType": "stageMode",
   "buildOption": {
+    "sourceOption": {
+      "workers": [
+        "./src/main/ets/workers/CaptureWorker.ets",
+        "./src/main/ets/workers/ProtocolWorker.ets",
+        "./src/main/ets/workers/FileWorker.ets",
+        "./src/main/ets/workers/HeartbeatWorker.ets"
+      ]
+    },
     "resOptions": {
       "copyCodeResource": {
         "enable": false
@@ -27,7 +35,7 @@
       "name": "default"
     },
     {
-      "name": "ohosTest",
+      "name": "ohosTest"
     }
   ]
 }

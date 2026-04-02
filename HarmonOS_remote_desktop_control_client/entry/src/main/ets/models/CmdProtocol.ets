@@ -67,6 +67,13 @@ export interface Cmd {
 
 // ==================== 客户端信息相关命令 ====================
 
+// 客户端发送设备信息
+export interface CmdReqCliInfo extends Cmd {
+  type: CmdType.ReqCliInfo;
+  screenNum: number;
+  osName: string;
+}
+
 // 服务器返回客户端信息
 export interface CmdResCliInfo extends Cmd {
   type: CmdType.ResCliInfo;
