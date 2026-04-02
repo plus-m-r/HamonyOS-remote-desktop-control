@@ -7,8 +7,16 @@ const DOMAIN: number = 0xFF00;
 const TAG: string = 'ProtocolHandler';
 
 /**
+ * 协议解析结果
+ */
+export interface ProtocolParseResultData {
+  commands: ConcreteCmd[];
+  remainingBuffer: ArrayBuffer;
+}
+
+/**
  * 协议处理器实现
- * 负责协议解析和命令处理
+ * 负责协议解析，不处理视频流
  */
 export class ProtocolHandler implements IProtocolHandler {
   private workerRepository: IWorkerRepository;
@@ -26,7 +34,6 @@ export class ProtocolHandler implements IProtocolHandler {
    */
   async processData(data: ArrayBuffer): Promise<void> {
     try {
-      // 使用 Worker 解析协议
       const parseTask: ProtocolParseTask = {
         existingBuffer: this.receiveBuffer,
         newData: data
@@ -35,7 +42,6 @@ export class ProtocolHandler implements IProtocolHandler {
 
       this.receiveBuffer = result.remainingBuffer;
 
-      // 处理解析出的命令
       for (let i = 0; i < result.commands.length; i++) {
         const cmdObj = result.commands[i];
         const cmd = ConcreteCmd.fromObject(cmdObj);
@@ -43,6 +49,38 @@ export class ProtocolHandler implements IProtocolHandler {
         if (this.commandCallback) {
           await this.commandCallback(cmd);
         }
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to process data: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  /**
+   * 获取视频流数据（无法解析为命令的数据）
+   * 返回 null 表示没有视频流数据
+   */
+  async processDataAndCheckVideo(data: ArrayBuffer, frameCallback: (data: ArrayBuffer) => void): Promise<void> {
+    try {
+      const parseTask: ProtocolParseTask = {
+        existingBuffer: this.receiveBuffer,
+        newData: data
+      };
+      const result: ProtocolParseResult = await this.workerRepository.parseProtocol(parseTask);
+
+      this.receiveBuffer = result.remainingBuffer;
+
+      if (result.commands.length > 0) {
+        for (let i = 0; i < result.commands.length; i++) {
+          const cmdObj = result.commands[i];
+          const cmd = ConcreteCmd.fromObject(cmdObj);
+          hilog.info(DOMAIN, TAG, 'Processing command: %{public}s', cmd.type);
+          if (this.commandCallback) {
+            await this.commandCallback(cmd);
+          }
+        }
+      } else {
+        hilog.info(DOMAIN, TAG, 'ProtocolHandler: Received video stream data, length: %{public}d', data.byteLength);
+        frameCallback(data);
       }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to process data: %{public}s', JSON.stringify(error));

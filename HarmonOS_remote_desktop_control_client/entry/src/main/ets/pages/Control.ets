@@ -72,26 +72,42 @@ struct Control {
   aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, 'Control页面开始加载');
 
-    // 获取路由参数
-    let deviceId = '';
-    let password = '';
-    
     try {
-      const uiContext = this.getUIContext();
-      const routerInstance = uiContext.getRouter();
-      const params = routerInstance.getParams() as RouterParams;
-      if (params) {
-        deviceId = params.deviceId || '';
-        password = params.password || '';
-        hilog.info(DOMAIN, TAG, '获取到路由参数 - deviceId: %{public}s, hasPassword: %{public}s',
-          deviceId, !!password);
+      if (!this.viewModel) {
+        hilog.error(DOMAIN, TAG, 'ViewModel未初始化，尝试重新初始化');
+        try {
+          this.viewModel = new ControlViewModel({
+            remoteControlService: ServiceProvider.remoteControlService,
+            fileService: ServiceProvider.fileService,
+            clipboardService: ServiceProvider.clipboardService
+          });
+        } catch (initError) {
+          hilog.error(DOMAIN, TAG, 'ViewModel初始化失败: %{public}s', JSON.stringify(initError));
+          return;
+        }
       }
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, '获取路由参数失败: %{public}s', JSON.stringify(error));
-    }
 
-    // 初始化 ViewModel
-    this.viewModel.initialize(deviceId, password);
+      let deviceId = '';
+      let password = '';
+
+      try {
+        const uiContext = this.getUIContext();
+        const routerInstance = uiContext.getRouter();
+        const params = routerInstance.getParams() as RouterParams;
+        if (params) {
+          deviceId = params.deviceId || '';
+          password = params.password || '';
+          hilog.info(DOMAIN, TAG, '获取到路由参数 - deviceId: %{public}s, hasPassword: %{public}s',
+            deviceId, !!password);
+        }
+      } catch (error) {
+        hilog.error(DOMAIN, TAG, '获取路由参数失败: %{public}s', JSON.stringify(error));
+      }
+
+      this.viewModel.initialize(deviceId, password);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Control页面初始化异常: %{public}s', JSON.stringify(error));
+    }
   }
 
   aboutToDisappear(): void {
@@ -194,19 +210,20 @@ struct Control {
   buildRemoteScreen() {
     Column() {
       Stack() {
-        // 屏幕内容
-        if (this.state.screenImage) {
-          Image(this.state.screenImage)
-            .width('100%')
-            .height('100%')
-            .objectFit(ImageFit.Contain)
-            .scale({ x: this.state.currentScale, y: this.state.currentScale })
-        } else {
-          Text('远程屏幕')
-            .fontSize(16)
-            .fontColor('#666')
-            .margin({ top: '40%' })
-        }
+        // 使用 XComponent 显示远程屏幕
+        XComponent({
+          id: 'remoteScreen',
+          type: XComponentType.SURFACE,
+          libraryname: ''
+        })
+        .width('100%')
+        .height('100%')
+        .onLoad((xComponent) => {
+          hilog.info(DOMAIN, TAG, 'XComponent loaded');
+          if (xComponent) {
+            this.viewModel.setXComponent(xComponent);
+          }
+        })
 
         // 拖拽提示
         if (this.state.isDragging) {

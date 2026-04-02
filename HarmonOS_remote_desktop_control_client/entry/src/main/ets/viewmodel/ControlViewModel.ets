@@ -144,6 +144,14 @@ export class ControlViewModel {
   }
 
   /**
+   * 设置 XComponent 用于视频渲染
+   */
+  setXComponent(xComponent: Object): void {
+    hilog.info(DOMAIN, TAG, 'XComponent set in ViewModel');
+    this.dependencies.remoteControlService.setXComponent(xComponent);
+  }
+
+  /**
    * 显示 Toast
    */
   private showToast(message: string, duration: number = 2000): void {

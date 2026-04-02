@@ -81,6 +81,12 @@ export interface IRemoteControlService {
    */
   setScreenCallback(callback: ScreenCallback): void;
 
+  /**
+   * 设置 XComponent 用于视频渲染
+   * @param xComponent XComponent 组件实例
+   */
+  setXComponent(xComponent: Object): void;
+
   // ========== 输入控制 ==========
 
   /**

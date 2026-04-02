@@ -69,20 +69,34 @@ workerPort.onmessage = (message: MessageEvent<ProtocolTaskMessage>) => {
  */
 async function processMessage(existingBuffer: ArrayBuffer, newData: ArrayBuffer): Promise<ProcessMessageResult> {
   // 合并缓冲区
-  const newBuffer = new ArrayBuffer(existingBuffer.byteLength + newData.byteLength);
-  const newView = new Uint8Array(newBuffer);
-  newView.set(new Uint8Array(existingBuffer), 0);
-  newView.set(new Uint8Array(newData), existingBuffer.byteLength);
+  const mergedBuffer = new ArrayBuffer(existingBuffer.byteLength + newData.byteLength);
+  const mergedView = new Uint8Array(mergedBuffer);
+  mergedView.set(new Uint8Array(existingBuffer), 0);
+  mergedView.set(new Uint8Array(newData), existingBuffer.byteLength);
+
+  console.info('ProtocolWorker: Merged buffer - existing: ' + existingBuffer.byteLength + ', new: ' + newData.byteLength + ', total: ' + mergedBuffer.byteLength);
+
+  // 输出前16个字节的16进制值，用于调试
+  if (mergedBuffer.byteLength > 0) {
+    const firstBytes = new Uint8Array(mergedBuffer.slice(0, Math.min(16, mergedBuffer.byteLength)));
+    const hexStr = Array.from(firstBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.info('ProtocolWorker: First 16 bytes (hex): ' + hexStr);
+    console.info('ProtocolWorker: First byte (decimal): ' + firstBytes[0] + ', expected 100 (0x64)');
+  }
 
   // 提取命令
-  const result = CmdCodec.extractCommands(newBuffer);
-  
+  const result = CmdCodec.extractCommands(mergedBuffer);
+
+  console.info('ProtocolWorker: Extracted ' + result[1].length + ' commands, remaining: ' + result[0].byteLength);
+
   // 转换为纯对象数组
   const commandObjects: Record<string, Object>[] = [];
   for (let i = 0; i < result[1].length; i++) {
-    commandObjects.push(result[1][i].toJSON());
+    const cmd = result[1][i];
+    commandObjects.push(cmd.toJSON());
+    console.info('ProtocolWorker: Command ' + i + ': type=' + cmd.type + ', id=' + cmd.id);
   }
-  
+
   return {
     remainingBuffer: result[0],
     commands: commandObjects

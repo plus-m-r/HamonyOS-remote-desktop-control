@@ -21,7 +21,8 @@ import {
 import { 
   ClientInfoCallback, 
   ConnectionCallback, 
-  ClipboardCallback
+  ClipboardCallback,
+  CaptureStatus
 } from '../../models/CmdProtocol';
 import { IConnectionManager } from '../connection/IConnectionManager';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
@@ -128,6 +129,13 @@ export class RemoteControlService implements IRemoteControlService {
       await this.processCommand(cmd);
     });
 
+    // 使用 processDataAndCheckVideo 来同时处理命令和视频流
+    this.connectionManager.setMessageCallback((data: ArrayBuffer) => {
+      this.protocolHandler.processDataAndCheckVideo(data, async (videoData: ArrayBuffer) => {
+        await this.onVideoStreamData(videoData);
+      });
+    });
+
     // 心跳回调
     this.heartbeatManager.setHeartbeatCallback(() => {
       this.sendHeartbeat();
@@ -185,6 +193,15 @@ export class RemoteControlService implements IRemoteControlService {
     this.isValidating = true;
 
     hilog.info(DOMAIN, TAG, 'Opening remote screen: %{public}s', deviceCode);
+
+    try {
+      const captureCmd = CmdUtils.createCaptureCmd(deviceCode, password, 1);
+      const encoded = CmdCodec.encode(captureCmd);
+      await this.connectionManager.send(encoded);
+      hilog.info(DOMAIN, TAG, 'ReqCapture command sent successfully');
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to send ReqCapture command: %{public}s', JSON.stringify(error));
+    }
   }
 
   /**
@@ -202,6 +219,10 @@ export class RemoteControlService implements IRemoteControlService {
    */
   setScreenCallback(callback: ScreenCallback): void {
     this.screenCallback = callback;
+  }
+
+  setXComponent(xComponent: Object): void {
+    hilog.info(DOMAIN, TAG, 'XComponent set for video rendering');
   }
 
   /**
@@ -341,6 +362,14 @@ export class RemoteControlService implements IRemoteControlService {
 
   // ========== 私有方法 ==========
 
+  // 心跳相关
+  private lastHeartbeatTime: number = 0;
+
+  // 屏幕尺寸信息
+  private screenWidth: number = 1920;
+  private screenHeight: number = 1080;
+  private screenFps: number = 30;
+
   /**
    * 处理命令
    */
@@ -351,6 +380,18 @@ export class RemoteControlService implements IRemoteControlService {
       case CmdType.ResCliInfo:
         await this.handleClientInfoCommand(cmd);
         break;
+      case CmdType.ResPong:
+        this.handleHeartbeatPong();
+        break;
+      case CmdType.ReqPing:
+        this.handleHeartbeatPing();
+        break;
+      case CmdType.ResCapture:
+        this.handleCaptureResponse(cmd);
+        break;
+      case CmdType.CaptureConfig:
+        this.handleCaptureConfigCommand(cmd);
+        break;
       case CmdType.Capture:
         await this.handleCaptureCommand(cmd);
         break;
@@ -358,7 +399,84 @@ export class RemoteControlService implements IRemoteControlService {
         this.handleValidationResult(cmd);
         break;
       default:
-        hilog.warn(DOMAIN, TAG, 'Unknown command type: %{public}d', cmdType);
+        hilog.warn(DOMAIN, TAG, 'Unhandled command: %{public}s', cmdType);
+    }
+  }
+
+  /**
+   * 处理心跳响应（服务器返回Pong）
+   */
+  private handleHeartbeatPong(): void {
+    this.lastHeartbeatTime = Date.now();
+    hilog.info(DOMAIN, TAG, 'Heartbeat pong received, connection alive');
+  }
+
+  /**
+   * 处理心跳请求（收到服务器的心跳）
+   */
+  private handleHeartbeatPing(): void {
+    hilog.debug(DOMAIN, TAG, 'Heartbeat ping received from server');
+  }
+
+  /**
+   * 处理屏幕捕获响应（服务器确认开始推流）
+   */
+  private handleCaptureResponse(cmd: ConcreteCmd): void {
+    const data = cmd.getData();
+    const status = data.status as CaptureStatus;
+
+    hilog.info(DOMAIN, TAG, 'ResCapture received - status: %{public}s', status);
+
+    if (status === 'OK') {
+      hilog.info(DOMAIN, TAG, 'Remote screen capture started, video stream incoming');
+      this.remoteControlEnabled = true;
+    } else {
+      hilog.error(DOMAIN, TAG, 'Remote screen capture failed with status: %{public}s', status);
+      this.remoteControlEnabled = false;
+    }
+  }
+
+  /**
+   * 处理屏幕捕获配置（包含屏幕尺寸）
+   */
+  private handleCaptureConfigCommand(cmd: ConcreteCmd): void {
+    const data = cmd.getData();
+    const width = data.width;
+    const height = data.height;
+    const fps = data.fps;
+
+    hilog.info(DOMAIN, TAG, 'CaptureConfig received - width: %{public}d, height: %{public}d, fps: %{public}d', width, height, fps);
+
+    // 保存屏幕尺寸信息，供后续渲染使用
+    this.screenWidth = width;
+    this.screenHeight = height;
+    this.screenFps = fps;
+
+    hilog.info(DOMAIN, TAG, 'Screen dimensions saved: %{public}d x %{public}d', width, height);
+  }
+
+  /**
+   * 处理视频流裸数据
+   */
+  /**
+   * 处理视频流裸数据
+   */
+  private async onVideoStreamData(data: ArrayBuffer): Promise<void> {
+    hilog.info(DOMAIN, TAG, 'Received video stream data, length: %{public}d', data.byteLength);
+
+    // 视频数据需要通过 CaptureWorker 解压
+    try {
+      hilog.info(DOMAIN, TAG, 'Processing video stream through CaptureWorker');
+      // 注意：实际项目中应该通过 WorkerRepository 调用 CaptureWorker
+      // 这里暂时记录日志，因为视频解码需要复杂的瓦片重组逻辑
+      hilog.info(DOMAIN, TAG, 'Video stream requires decompression, size: %{public}d bytes', data.byteLength);
+
+      if (this.screenCallback) {
+        // 如果没有解码器，暂时传递原始数据
+        this.screenCallback(data, this.screenWidth, this.screenHeight, Date.now());
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to process video stream: %{public}s', JSON.stringify(error));
     }
   }
 
@@ -385,7 +503,26 @@ export class RemoteControlService implements IRemoteControlService {
    */
   private async handleCaptureCommand(cmd: ConcreteCmd): Promise<void> {
     try {
-      hilog.info(DOMAIN, TAG, 'Processing capture command');
+      const data = cmd.getData();
+      const imageData = data.imageData;
+      const compressionMethod = data.compressionMethod;
+
+      // 使用保存的屏幕尺寸，而不是解析出来的0值
+      const width = this.screenWidth;
+      const height = this.screenHeight;
+
+      hilog.info(DOMAIN, TAG, 'Processing capture - size: %{public}d x %{public}d, compression: %{public}d',
+        width, height, compressionMethod);
+
+      if (imageData instanceof ArrayBuffer && this.screenCallback) {
+        const dataLen = imageData.byteLength;
+        hilog.info(DOMAIN, TAG, 'Processing capture - dataLen: %{public}d', dataLen);
+        this.screenCallback(imageData, width, height, Date.now());
+      } else if (typeof imageData === 'string' && imageData.length > 0 && this.screenCallback) {
+        hilog.info(DOMAIN, TAG, 'Processing capture - string data length: %{public}d', imageData.length);
+      } else {
+        hilog.warn(DOMAIN, TAG, 'Processing capture - no valid image data');
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to process capture: %{public}s', JSON.stringify(error));
     }
