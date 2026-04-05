@@ -487,7 +487,7 @@ export class RemoteControlService implements IRemoteControlService {
 
   /**
    * 处理原始视频数据
-   * 流程：Worker 解压 -> CaptureProcessor 帧合并 -> 渲染
+   * 流程：获取 prevBuffer -> Worker 解压 + 绘制 -> CaptureProcessor 更新 prevBuffer -> 渲染
    * @param data 压缩的视频数据
    * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
    */
@@ -496,21 +496,23 @@ export class RemoteControlService implements IRemoteControlService {
       data.byteLength, compressionMethod);
 
     try {
-      // 发送到 Worker 解压
+      const prevParams = this.captureProcessor.getPrevBufferParams();
+
       const imageTask: ImageProcessTask = {
         imageData: data,
-        compressionMethodOrdinal: compressionMethod
+        compressionMethodOrdinal: compressionMethod,
+        prevBuffer: prevParams.buffer,
+        prevWidth: prevParams.width,
+        prevHeight: prevParams.height
       };
 
       const result: ImageProcessResult = await this.workerRepository.processImage(imageTask);
 
-      hilog.info(DOMAIN, TAG, 'Decompressed - width: %{public}d, height: %{public}d, frameId: %{public}d',
-        result.width, result.height, result.frameId);
+      hilog.info(DOMAIN, TAG, 'Decompressed - width: %{public}d, height: %{public}d, frameId: %{public}d, reused: %{public}s',
+        result.width, result.height, result.frameId, (!result.isKeyFrame && prevParams.buffer !== null).toString());
 
-      // 将 ArrayBuffer 转换为 Uint8Array
       const imageBuffer = new Uint8Array(result.imageBuffer);
 
-      // 通过 CaptureProcessor 处理帧合并
       const frameInfo: FrameInfo = {
         id: result.frameId,
         reset: result.isKeyFrame,
@@ -519,7 +521,6 @@ export class RemoteControlService implements IRemoteControlService {
       };
       const frameResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
 
-      // 渲染
       if (this.screenCallback) {
         const bufferData: ArrayBuffer = frameResult.buffer.buffer as ArrayBuffer;
         const widthVal: number = frameResult.width;

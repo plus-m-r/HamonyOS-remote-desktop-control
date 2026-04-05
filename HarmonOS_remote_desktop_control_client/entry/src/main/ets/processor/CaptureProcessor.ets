@@ -23,6 +23,12 @@ export interface FrameStats {
   bufferSize: number;
 }
 
+export interface PrevBufferParams {
+  buffer: ArrayBuffer | null;
+  width: number;
+  height: number;
+}
+
 export class CaptureProcessor {
   private prevBuffer: Uint8Array | null = null;
   private prevWidth: number = 0;
@@ -48,41 +54,35 @@ export class CaptureProcessor {
     hilog.info(DOMAIN, TAG, 'Processing frame: id=%{public}d, reset=%{public}s, size=%{public}d x %{public}d',
       id, reset.toString(), width, height);
 
-    let buffer: Uint8Array;
-
-    if (reset) {
-      hilog.info(DOMAIN, TAG, 'Key frame detected, creating new buffer');
-      buffer = new Uint8Array(bufferSize);
-    } else {
-      if (this.prevBuffer !== null &&
-          this.prevWidth === width &&
-          this.prevHeight === height &&
-          this.prevBuffer.length === bufferSize) {
-        buffer = this.prevBuffer;
-        hilog.info(DOMAIN, TAG, 'Incremental frame, reusing previous buffer');
-      } else {
-        hilog.warn(DOMAIN, TAG, 'Cannot reuse buffer: prev=%{public}d x %{public}d, current=%{public}d x %{public}d',
-          this.prevWidth, this.prevHeight, width, height);
-        buffer = new Uint8Array(bufferSize);
-      }
+    if (reset || this.prevWidth !== width || this.prevHeight !== height) {
+      this.prevBuffer = new Uint8Array(bufferSize);
+      this.prevWidth = width;
+      this.prevHeight = height;
+      hilog.info(DOMAIN, TAG, 'Keyframe or resolution changed, allocated new prevBuffer');
     }
 
-    const srcView = new Uint8Array(imageBuffer.buffer, imageBuffer.byteOffset, Math.min(bufferSize, imageBuffer.length));
-    buffer.set(srcView);
-
-    if (buffer !== this.prevBuffer) {
-      this.prevBuffer = buffer.slice();
+    if (this.prevBuffer) {
+      this.prevBuffer.set(imageBuffer);
     }
-    this.prevWidth = width;
-    this.prevHeight = height;
 
     this.frameCount++;
 
     return {
-      buffer,
+      buffer: imageBuffer,
       width,
       height,
       isKeyFrame: reset
+    };
+  }
+
+  getPrevBufferParams(): PrevBufferParams {
+    const localBuffer: ArrayBuffer | null = this.prevBuffer ? this.prevBuffer.buffer as ArrayBuffer : null;
+    const localWidth: number = this.prevWidth;
+    const localHeight: number = this.prevHeight;
+    return {
+      buffer: localBuffer,
+      width: localWidth,
+      height: localHeight
     };
   }
 

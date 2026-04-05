@@ -6,14 +6,8 @@ import { IFileService } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
 import { IConnectionManager } from '../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../services/protocol/IProtocolHandler';
-
-/**
- * 基础服务接口
- * 所有服务都应该实现此接口
- */
-interface BaseService {
-  cleanup?(): void;
-}
+import { IWorkerRepository } from '../repository/IWorkerRepository';
+import { BaseService } from './BaseService';
 
 /**
  * 依赖注入容器
@@ -141,36 +135,42 @@ export class Injector {
       // 动态导入服务工厂
       const connectionManagerModule = await import('./factories/ConnectionManagerFactory');
       const protocolHandlerModule = await import('./factories/ProtocolHandlerFactory');
+      const workerRepositoryModule = await import('./factories/WorkerRepositoryFactory');
       const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
       const clipboardModule = await import('./factories/ClipboardServiceFactory');
       const fileModule = await import('./factories/FileServiceFactory');
 
       const ConnectionManagerFactory = connectionManagerModule.ConnectionManagerFactory;
       const ProtocolHandlerFactory = protocolHandlerModule.ProtocolHandlerFactory;
+      const WorkerRepositoryFactory = workerRepositoryModule.WorkerRepositoryFactory;
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
 
       // 注册服务工厂 - 返回接口类型
-      // 注意：注册顺序很重要，因为 RemoteControlService 依赖于 ConnectionManager 和 ProtocolHandler
-      this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER, () => 
-        ConnectionManagerFactory.create()
+      // 注意：注册顺序很重要，因为 RemoteControlService 依赖于 ConnectionManager、ProtocolHandler 和 WorkerRepository
+      this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER,
+        () => ConnectionManagerFactory.create()
       );
-      
-      this.registerFactory<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER, () => 
-        ProtocolHandlerFactory.create()
+
+      this.registerFactory<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER,
+        () => ProtocolHandlerFactory.create()
       );
-      
-      this.registerFactory<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE, () => 
-        RemoteControlServiceFactory.create()
+
+      this.registerFactory<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY,
+        () => WorkerRepositoryFactory.create()
       );
-      
-      this.registerFactory<IClipboardService>(ServiceKeys.CLIPBOARD_SERVICE, () => 
-        ClipboardServiceFactory.create()
+
+      this.registerFactory<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE,
+        () => RemoteControlServiceFactory.create()
       );
-      
-      this.registerFactory<IFileService>(ServiceKeys.FILE_SERVICE, () => 
-        FileServiceFactory.create()
+
+      this.registerFactory<IClipboardService>(ServiceKeys.CLIPBOARD_SERVICE,
+        () => ClipboardServiceFactory.create()
+      );
+
+      this.registerFactory<IFileService>(ServiceKeys.FILE_SERVICE,
+        () => FileServiceFactory.create()
       );
 
       console.info('Injector: All service factories registered');

@@ -10,6 +10,9 @@ const TAG = '[CaptureWorker]';
 interface CaptureTask {
   imageData: ArrayBuffer | string;
   compressionMethodOrdinal: number;
+  prevBuffer: ArrayBuffer | null;
+  prevWidth: number;
+  prevHeight: number;
 }
 
 interface CaptureTaskMessage {
@@ -81,17 +84,20 @@ workerPort.onmessage = (message: MessageEvent<CaptureTaskMessage | ResetCacheMes
 
 /**
  * 处理捕获任务
- * 在 Worker 线程中执行，只负责：
+ * 在 Worker 线程中执行，负责：
  * 1. 解压数据得到 Capture 对象
- * 2. 创建图像缓冲区
+ * 2. 复用 prevBuffer 或创建新缓冲区
  * 3. 将 dirty tiles 绘制到缓冲区
  *
- * 注意：帧缓存（prevBuffer）由主线程的 CaptureProcessor 管理
+ * 注意：帧缓存（prevBuffer）由主线程的 CaptureProcessor 管理并传递
  * 这样即使 Worker 重启，帧缓存也不会丢失
  */
 async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
   const imageData = task.imageData;
   const compressionMethodOrdinal = task.compressionMethodOrdinal;
+  const prevBuffer = task.prevBuffer;
+  const prevWidth = task.prevWidth;
+  const prevHeight = task.prevHeight;
 
   const payloadBuffer = imageData instanceof ArrayBuffer ? imageData : new ArrayBuffer(0);
 
@@ -120,9 +126,21 @@ async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
   const compressor = Compressor.get(squeezeMethod);
   const capture = await compressor.decompress(tileCache, zippedData);
 
-  // 4. 创建图像缓冲区
-  const bufferSize = capture.width * capture.height * 4;
-  const imageBuffer = new Uint8Array(bufferSize);
+  // 4. 决定是否复用 prevBuffer
+  const width = capture.width;
+  const height = capture.height;
+  const bufferSize = width * height * 4;
+  const reset = capture.reset;
+
+  let imageBuffer: Uint8Array;
+
+  if (!reset && prevBuffer !== null && prevWidth === width && prevHeight === height) {
+    // 增量帧且尺寸匹配：复用 prevBuffer
+    imageBuffer = new Uint8Array(prevBuffer);
+  } else {
+    // 完整帧或尺寸不匹配：创建新缓冲区
+    imageBuffer = new Uint8Array(bufferSize);
+  }
 
   // 5. 将 dirty tiles 绘制到缓冲区
   capture.drawToBuffer(imageBuffer);
@@ -133,14 +151,14 @@ async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
   // 统计处理的瓦片数
   const tileCount = capture.dirtyTiles.filter(t => t !== null).length;
 
-  console.info(`${TAG} Processed frame ${capture.id}: ${capture.width}x${capture.height}, ${tileCount} tiles, reset=${capture.reset}`);
+  console.info(`${TAG} Processed frame ${capture.id}: ${width}x${height}, ${tileCount} tiles, reset=${reset}, reused=${!reset && prevBuffer !== null && prevWidth === width && prevHeight === height}`);
 
   return {
     imageBuffer: imageBuffer.buffer as ArrayBuffer,
-    width: capture.width,
-    height: capture.height,
+    width: width,
+    height: height,
     frameId: capture.id,
-    isKeyFrame: capture.reset,
+    isKeyFrame: reset,
     tileCount: tileCount
   };
 }

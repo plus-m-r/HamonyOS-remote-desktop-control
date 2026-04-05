@@ -75,7 +75,9 @@ struct Index {
       // 初始化 ViewModel
       this.viewModel.initialize();
     } catch (error) {
-      hilog.error(DOMAIN, TAG, '初始化ViewModel失败: %{public}s', JSON.stringify(error));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+      hilog.error(DOMAIN, TAG, '初始化ViewModel失败: %{public}s, stack: %{public}s', errorMessage, errorStack);
     }
   }
 

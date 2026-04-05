@@ -176,8 +176,9 @@ export default class EntryAbility extends UIAbility {
       
       hilog.info(DOMAIN, 'testTag', '服务初始化完成');
     } catch (error) {
-      // 捕获并记录初始化过程中的任何错误
-      hilog.error(DOMAIN, 'testTag', '服务初始化失败: %{public}s', JSON.stringify(error));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+      hilog.error(DOMAIN, 'testTag', '服务初始化失败: %{public}s, stack: %{public}s', errorMessage, errorStack);
     }
   }
   

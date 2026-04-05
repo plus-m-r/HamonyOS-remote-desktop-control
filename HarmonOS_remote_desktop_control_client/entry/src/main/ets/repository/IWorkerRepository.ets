@@ -1,8 +1,9 @@
 import { ConcreteCmd } from '../models/ConcreteCmd';
+import { BaseService } from '../di/BaseService';
 
 /**
  * Worker 仓库接口
- * 
+ *
  * 抽象 Worker 操作，便于：
  * 1. 单元测试时 Mock Worker 行为
  * 2. 控制 Worker 执行（同步/异步）
@@ -15,6 +16,9 @@ import { ConcreteCmd } from '../models/ConcreteCmd';
 export interface ImageProcessTask {
   imageData: ArrayBuffer | string;
   compressionMethodOrdinal: number;
+  prevBuffer: ArrayBuffer | null;
+  prevWidth: number;
+  prevHeight: number;
 }
 
 /**
@@ -60,7 +64,7 @@ export interface ProtocolParseResult {
 /**
  * Worker 仓库接口
  */
-export interface IWorkerRepository {
+export interface IWorkerRepository extends BaseService {
   /**
    * 初始化 Worker
    */
