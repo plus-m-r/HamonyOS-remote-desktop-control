@@ -1,32 +1,37 @@
 /**
  * 远程控制服务
- * 使用拆分类降低复杂度和耦合度：
- * - ConnectionManager: 管理连接
- * - ProtocolHandler: 处理协议
+ *
+ * 职责划分：
+ * - ConnectionManager: 管理 TCP 连接
+ * - ProtocolHandler: 处理协议解析（只解析命令）
  * - HeartbeatManager: 管理心跳
+ * - CaptureProcessor: 帧合并逻辑（在主线程）
+ * - WorkerRepository: 任务发送到 Worker 线程
  */
 
-import { 
-  IRemoteControlService, 
-  DeviceCredentials, 
-  ScreenCallback, 
+import {
+  IRemoteControlService,
+  DeviceCredentials,
+  ScreenCallback,
   DeviceInfoCallback,
   RemoteControlServiceConfig
 } from '../interfaces/IRemoteControlService';
-import { 
-  RemoteControlEvent, 
-  ConnectionState, 
+import {
+  RemoteControlEvent,
+  ConnectionState,
   DeviceValidationResult
 } from '../../models/DeviceInfo';
-import { 
-  ClientInfoCallback, 
-  ConnectionCallback, 
+import {
+  ClientInfoCallback,
+  ConnectionCallback,
   ClipboardCallback,
   CaptureStatus
 } from '../../models/CmdProtocol';
 import { IConnectionManager } from '../connection/IConnectionManager';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../interfaces/IHeartbeatManager';
+import { IWorkerRepository, ImageProcessTask, ImageProcessResult } from '../../repository/IWorkerRepository';
+import { CaptureProcessor, FrameProcessResult, FrameInfo } from '../../processor/CaptureProcessor';
 import { CmdCodec } from '../../network/CmdCodec';
 import { ConcreteCmd } from '../../models/ConcreteCmd';
 import { CmdType } from '../../models/CmdProtocol';
@@ -37,12 +42,13 @@ const DOMAIN: number = 0xFF00;
 const TAG: string = 'RemoteControlService';
 
 /**
- * 远程控制服务
- * 使用拆分类降低复杂度和耦合度：
- * - ConnectionManager: 管理连接
- * - ProtocolHandler: 处理协议
- * - HeartbeatManager: 管理心跳
+ * 视频流配置
  */
+interface VideoStreamConfig {
+  enabled: boolean;
+  compressionMethod: number;
+}
+
 export class RemoteControlService implements IRemoteControlService {
   // 配置
   private config: RemoteControlServiceConfig;
@@ -51,13 +57,22 @@ export class RemoteControlService implements IRemoteControlService {
   private connectionManager: IConnectionManager;
   private protocolHandler: IProtocolHandler;
   private heartbeatManager: IHeartbeatManager;
+  private workerRepository: IWorkerRepository;
+
+  // 帧处理器
+  private captureProcessor: CaptureProcessor = new CaptureProcessor();
+
+  // 视频流配置
+  private videoConfig: VideoStreamConfig = {
+    enabled: false,
+    compressionMethod: 3 // ZSTD
+  };
 
   // 设备信息
   private localDeviceCode: string = '';
   private localPassword: string = '';
   private remoteDeviceCode: string = '';
   private remotePassword: string = '';
-  private remoteControlEnabled: boolean = false;
   private isValidating: boolean = false;
 
   // 回调
@@ -72,9 +87,9 @@ export class RemoteControlService implements IRemoteControlService {
     config: RemoteControlServiceConfig,
     connectionManager: IConnectionManager,
     protocolHandler: IProtocolHandler,
-    heartbeatManager: IHeartbeatManager
+    heartbeatManager: IHeartbeatManager,
+    workerRepository: IWorkerRepository
   ) {
-    // 合并默认配置
     this.config = {
       host: config.host,
       port: config.port,
@@ -83,15 +98,13 @@ export class RemoteControlService implements IRemoteControlService {
       heartbeatInterval: config.heartbeatInterval !== undefined ? config.heartbeatInterval : 3000
     };
 
-    // 注入依赖
     this.connectionManager = connectionManager;
     this.protocolHandler = protocolHandler;
     this.heartbeatManager = heartbeatManager;
+    this.workerRepository = workerRepository;
 
-    // 设置回调
     this.setupCallbacks();
-
-    hilog.info(DOMAIN, TAG, 'Service initialized with injected dependencies');
+    hilog.info(DOMAIN, TAG, 'RemoteControlService initialized');
   }
 
   /**
@@ -101,7 +114,7 @@ export class RemoteControlService implements IRemoteControlService {
     // 连接状态回调
     this.connectionManager.setConnectionCallback((connected: boolean) => {
       hilog.info(DOMAIN, TAG, 'Connection state changed: %{public}s', connected ? 'connected' : 'disconnected');
-      
+
       if (connected) {
         this.sendClientInfo();
         this.startHeartbeat();
@@ -114,9 +127,9 @@ export class RemoteControlService implements IRemoteControlService {
       }
     });
 
-    // 消息接收回调
+    // 消息接收回调 - 所有数据都先发送给 ProtocolHandler 解析
     this.connectionManager.setMessageCallback((data: ArrayBuffer) => {
-      this.protocolHandler.processData(data);
+      this.handleReceivedData(data);
     });
 
     // 错误回调
@@ -129,24 +142,40 @@ export class RemoteControlService implements IRemoteControlService {
       await this.processCommand(cmd);
     });
 
-    // 使用 processDataAndCheckVideo 来同时处理命令和视频流
-    this.connectionManager.setMessageCallback((data: ArrayBuffer) => {
-      this.protocolHandler.processDataAndCheckVideo(data, async (videoData: ArrayBuffer) => {
-        await this.onVideoStreamData(videoData);
-      });
-    });
-
     // 心跳回调
     this.heartbeatManager.setHeartbeatCallback(() => {
       this.sendHeartbeat();
     });
   }
 
+  /**
+   * 处理接收到的数据
+   * 数据可能来自：
+   * 1. ProtocolHandler 解析出的命令 (包括 CmdCapture)
+   * 2. 残留数据 (不应发生)
+   *
+   * 注意: CmdCapture 命令通过 commandCallback -> processCommand -> handleCaptureData 处理
+   *       所有视频数据都通过 CmdCapture 命令传递，不再有独立的"原始视频数据"流
+   */
+  private async handleReceivedData(data: ArrayBuffer): Promise<void> {
+    hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', data.byteLength);
+
+    // 尝试让 ProtocolHandler 解析命令
+    // CmdCapture 命令会通过 commandCallback -> handleCaptureData 处理
+    const commands = await this.protocolHandler.processData(data);
+
+    if (commands.length > 0) {
+      // 有命令，已通过 commandCallback 处理
+      hilog.info(DOMAIN, TAG, 'Processed %{public}d commands', commands.length);
+    } else {
+      // 没有命令，可能是残留数据或粘包情况
+      // CmdCapture 命令通过 callback 处理，不会出现在 commands 数组中
+      hilog.warn(DOMAIN, TAG, 'No commands parsed, %{public}d bytes of data ignored', data.byteLength);
+    }
+  }
+
   // ========== IRemoteControlService 实现 ==========
 
-  /**
-   * 连接到服务端
-   */
   async connect(onSuccess?: () => void, onError?: (error: string) => void): Promise<void> {
     try {
       await this.connectionManager.connect();
@@ -160,33 +189,22 @@ export class RemoteControlService implements IRemoteControlService {
     }
   }
 
-  /**
-   * 断开连接
-   */
   async disconnect(): Promise<void> {
     this.stopHeartbeat();
+    this.captureProcessor.reset();
     await this.connectionManager.disconnect();
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
   }
 
-  /**
-   * 获取连接状态
-   */
   getConnectionState(): ConnectionState {
     return this.connectionManager.getConnectionState();
   }
 
-  /**
-   * 设置连接状态回调
-   */
   setConnectionCallback(callback: ConnectionCallback): void {
     this.connectionCallback = callback;
   }
 
-  /**
-   * 打开远程屏幕
-   */
   async openRemoteScreen(deviceCode: string, password: string): Promise<void> {
     this.remoteDeviceCode = deviceCode;
     this.remotePassword = password;
@@ -198,25 +216,20 @@ export class RemoteControlService implements IRemoteControlService {
       const captureCmd = CmdUtils.createCaptureCmd(deviceCode, password, 1);
       const encoded = CmdCodec.encode(captureCmd);
       await this.connectionManager.send(encoded);
-      hilog.info(DOMAIN, TAG, 'ReqCapture command sent successfully');
+      hilog.info(DOMAIN, TAG, 'ReqCapture command sent');
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to send ReqCapture command: %{public}s', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, 'Failed to send ReqCapture: %{public}s', JSON.stringify(error));
     }
   }
 
-  /**
-   * 关闭远程屏幕
-   */
   closeRemoteScreen(): void {
-    this.remoteControlEnabled = false;
+    this.videoConfig.enabled = false;
     this.remoteDeviceCode = '';
     this.remotePassword = '';
+    this.captureProcessor.reset();
     hilog.info(DOMAIN, TAG, 'Remote screen closed');
   }
 
-  /**
-   * 设置屏幕数据回调
-   */
   setScreenCallback(callback: ScreenCallback): void {
     this.screenCallback = callback;
   }
@@ -225,150 +238,87 @@ export class RemoteControlService implements IRemoteControlService {
     hilog.info(DOMAIN, TAG, 'XComponent set for video rendering');
   }
 
-  /**
-   * 发送控制事件
-   */
   async sendControlEvent(event: RemoteControlEvent): Promise<void> {
-    if (!this.remoteControlEnabled) {
+    if (!this.videoConfig.enabled) {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-
     hilog.info(DOMAIN, TAG, 'Sending control event: %{public}s', event.type);
   }
 
-  /**
-   * 发送鼠标控制
-   */
   async sendMouseControl(x: number, y: number, action: number, wheelDelta?: number): Promise<void> {
-    if (!this.remoteControlEnabled) {
+    if (!this.videoConfig.enabled) {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-
     hilog.info(DOMAIN, TAG, 'Sending mouse control: x=%{public}d, y=%{public}d, action=%{public}d', x, y, action);
   }
 
-  /**
-   * 发送键盘控制
-   */
   async sendKeyControl(keyCode: number, pressed: boolean): Promise<void> {
-    if (!this.remoteControlEnabled) {
+    if (!this.videoConfig.enabled) {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-
     hilog.info(DOMAIN, TAG, 'Sending key control: keyCode=%{public}d, pressed=%{public}s', keyCode, String(pressed));
   }
 
-  /**
-   * 设置设备信息回调
-   */
   setDeviceInfoCallback(callback: DeviceInfoCallback): void {
     this.deviceInfoCallback = callback;
   }
 
-  /**
-   * 设置设备信息
-   */
   setDeviceInfo(deviceCode: string, password: string): void {
     this.remoteDeviceCode = deviceCode;
     this.remotePassword = password;
   }
 
-  /**
-   * 获取本地设备信息
-   */
   getLocalDeviceInfo(): DeviceCredentials {
-    return {
-      deviceCode: this.localDeviceCode,
-      password: this.localPassword
-    };
+    return { deviceCode: this.localDeviceCode, password: this.localPassword };
   }
 
-  /**
-   * 获取远程设备信息
-   */
   getRemoteDeviceInfo(): DeviceCredentials {
-    return {
-      deviceCode: this.remoteDeviceCode,
-      password: this.remotePassword
-    };
+    return { deviceCode: this.remoteDeviceCode, password: this.remotePassword };
   }
 
-  /**
-   * 设置远程控制权限
-   */
   setRemoteControlPermission(enabled: boolean): void {
-    this.remoteControlEnabled = enabled;
     hilog.info(DOMAIN, TAG, 'Remote control permission: %{public}s', enabled ? 'enabled' : 'disabled');
   }
 
-  /**
-   * 验证设备
-   */
   async validateDevice(deviceCode: string, password: string): Promise<DeviceValidationResult> {
-    return {
-      valid: deviceCode.length > 0 && password.length > 0,
-      message: '验证成功'
-    };
+    return { valid: deviceCode.length > 0 && password.length > 0, message: '验证成功' };
   }
 
-  /**
-   * 请求剪贴板内容
-   */
   async requestClipboard(): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Requesting clipboard content');
   }
 
-  /**
-   * 发送文本剪贴板
-   */
   async sendClipboardText(text: string): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Sending clipboard text');
   }
 
-  /**
-   * 发送文件剪贴板
-   */
   async sendClipboardFile(fileInfoId: string, fileName: string): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Sending clipboard file: %{public}s', fileName);
   }
 
-  /**
-   * 设置剪贴板回调
-   */
   setClipboardCallback(callback: ClipboardCallback): void {
     this.clipboardCallback = callback;
   }
 
-  /**
-   * 修改密码
-   */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Changing password');
   }
 
-  /**
-   * 清理资源
-   */
   cleanup(): void {
     this.stopHeartbeat();
     this.connectionManager.cleanup();
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
+    this.captureProcessor.reset();
     hilog.info(DOMAIN, TAG, 'Service cleaned up');
   }
 
   // ========== 私有方法 ==========
 
-  // 心跳相关
   private lastHeartbeatTime: number = 0;
-
-  // 屏幕尺寸信息
-  private screenWidth: number = 1920;
-  private screenHeight: number = 1080;
-  private screenFps: number = 30;
 
   /**
    * 处理命令
@@ -389,11 +339,11 @@ export class RemoteControlService implements IRemoteControlService {
       case CmdType.ResCapture:
         this.handleCaptureResponse(cmd);
         break;
+      case CmdType.Capture:
+        this.handleCaptureData(cmd);
+        break;
       case CmdType.CaptureConfig:
         this.handleCaptureConfigCommand(cmd);
-        break;
-      case CmdType.Capture:
-        await this.handleCaptureCommand(cmd);
         break;
       case CmdType.ResOpen:
         this.handleValidationResult(cmd);
@@ -403,19 +353,13 @@ export class RemoteControlService implements IRemoteControlService {
     }
   }
 
-  /**
-   * 处理心跳响应（服务器返回Pong）
-   */
   private handleHeartbeatPong(): void {
     this.lastHeartbeatTime = Date.now();
-    hilog.info(DOMAIN, TAG, 'Heartbeat pong received, connection alive');
+    hilog.debug(DOMAIN, TAG, 'Heartbeat pong received');
   }
 
-  /**
-   * 处理心跳请求（收到服务器的心跳）
-   */
   private handleHeartbeatPing(): void {
-    hilog.debug(DOMAIN, TAG, 'Heartbeat ping received from server');
+    hilog.debug(DOMAIN, TAG, 'Heartbeat ping received');
   }
 
   /**
@@ -428,104 +372,77 @@ export class RemoteControlService implements IRemoteControlService {
     hilog.info(DOMAIN, TAG, 'ResCapture received - status: %{public}s', status);
 
     if (status === 'OK') {
-      hilog.info(DOMAIN, TAG, 'Remote screen capture started, video stream incoming');
-      this.remoteControlEnabled = true;
+      hilog.info(DOMAIN, TAG, 'Remote screen capture started');
+      this.videoConfig.enabled = true;
+      this.captureProcessor.reset();
     } else {
-      hilog.error(DOMAIN, TAG, 'Remote screen capture failed with status: %{public}s', status);
-      this.remoteControlEnabled = false;
+      hilog.error(DOMAIN, TAG, 'Remote screen capture failed: %{public}s', status);
+      this.videoConfig.enabled = false;
     }
   }
 
   /**
-   * 处理屏幕捕获配置（包含屏幕尺寸）
+   * 处理屏幕捕获配置
    */
   private handleCaptureConfigCommand(cmd: ConcreteCmd): void {
     const data = cmd.getData();
-    const width = data.width;
-    const height = data.height;
-    const fps = data.fps;
+    const width = data.width || 0;
+    const height = data.height || 0;
+    const fps = data.fps || 0;
 
-    hilog.info(DOMAIN, TAG, 'CaptureConfig received - width: %{public}d, height: %{public}d, fps: %{public}d', width, height, fps);
-
-    // 保存屏幕尺寸信息，供后续渲染使用
-    this.screenWidth = width;
-    this.screenHeight = height;
-    this.screenFps = fps;
-
-    hilog.info(DOMAIN, TAG, 'Screen dimensions saved: %{public}d x %{public}d', width, height);
+    hilog.info(DOMAIN, TAG, 'CaptureConfig - width: %{public}d, height: %{public}d, fps: %{public}d', width, height, fps);
   }
 
   /**
-   * 处理视频流裸数据
+   * 处理屏幕捕获数据 (CmdCapture 命令)
+   * 从命令中提取压缩数据和压缩方法，传递给 onRawVideoData 处理
    */
-  /**
-   * 处理视频流裸数据
-   */
-  private async onVideoStreamData(data: ArrayBuffer): Promise<void> {
-    hilog.info(DOMAIN, TAG, 'Received video stream data, length: %{public}d', data.byteLength);
-
-    // 视频数据需要通过 CaptureWorker 解压
-    try {
-      hilog.info(DOMAIN, TAG, 'Processing video stream through CaptureWorker');
-      // 注意：实际项目中应该通过 WorkerRepository 调用 CaptureWorker
-      // 这里暂时记录日志，因为视频解码需要复杂的瓦片重组逻辑
-      hilog.info(DOMAIN, TAG, 'Video stream requires decompression, size: %{public}d bytes', data.byteLength);
-
-      if (this.screenCallback) {
-        // 如果没有解码器，暂时传递原始数据
-        this.screenCallback(data, this.screenWidth, this.screenHeight, Date.now());
-      }
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to process video stream: %{public}s', JSON.stringify(error));
-    }
-  }
-
-  /**
-   * 处理客户端信息命令
-   */
-  private async handleClientInfoCommand(cmd: ConcreteCmd): Promise<void> {
+  private async handleCaptureData(cmd: ConcreteCmd): Promise<void> {
     const data = cmd.getData();
-    const deviceCode = data.deviceCode;
-    const password = data.password;
+    const imageData = data.imageData;
+    const compressionMethod = data.compressionMethod || 3; // 默认 ZSTD
 
-    this.localDeviceCode = deviceCode;
-    this.localPassword = password;
-
-    if (this.deviceInfoCallback) {
-      this.deviceInfoCallback(deviceCode, password);
+    if (!imageData || (typeof imageData === 'string' && imageData.length === 0)) {
+      hilog.error(DOMAIN, TAG, 'CaptureData command has no image data');
+      return;
     }
 
-    hilog.info(DOMAIN, TAG, 'Received device info: %{public}s', deviceCode);
+    hilog.info(DOMAIN, TAG, 'CmdCapture received - imageData size: %{public}d, compressionMethod: %{public}d',
+      typeof imageData === 'string' ? imageData.length : (imageData as ArrayBuffer).byteLength,
+      compressionMethod);
+
+    // 将 imageData 转换为 ArrayBuffer (如果是 string 格式)
+    let payloadBuffer: ArrayBuffer;
+    if (typeof imageData === 'string') {
+      // 尝试从 base64 或直接解析
+      payloadBuffer = this.decodeImageData(imageData);
+    } else {
+      payloadBuffer = imageData as ArrayBuffer;
+    }
+
+    // 调用 onRawVideoData 处理视频数据
+    await this.onRawVideoData(payloadBuffer, compressionMethod);
   }
 
   /**
-   * 处理捕获命令
+   * 解码图像数据
+   * 支持 base64 编码或直接 ArrayBuffer
    */
-  private async handleCaptureCommand(cmd: ConcreteCmd): Promise<void> {
+  private decodeImageData(imageData: string): ArrayBuffer {
     try {
-      const data = cmd.getData();
-      const imageData = data.imageData;
-      const compressionMethod = data.compressionMethod;
-
-      // 使用保存的屏幕尺寸，而不是解析出来的0值
-      const width = this.screenWidth;
-      const height = this.screenHeight;
-
-      hilog.info(DOMAIN, TAG, 'Processing capture - size: %{public}d x %{public}d, compression: %{public}d',
-        width, height, compressionMethod);
-
-      if (imageData instanceof ArrayBuffer && this.screenCallback) {
-        const dataLen = imageData.byteLength;
-        hilog.info(DOMAIN, TAG, 'Processing capture - dataLen: %{public}d', dataLen);
-        this.screenCallback(imageData, width, height, Date.now());
-      } else if (typeof imageData === 'string' && imageData.length > 0 && this.screenCallback) {
-        hilog.info(DOMAIN, TAG, 'Processing capture - string data length: %{public}d', imageData.length);
-      } else {
-        hilog.warn(DOMAIN, TAG, 'Processing capture - no valid image data');
+      // 检查是否是 base64 编码
+      if (imageData.length > 0) {
+        // 尝试直接解析为 ArrayBuffer
+        const bytes = new Uint8Array(imageData.length);
+        for (let i = 0; i < imageData.length; i++) {
+          bytes[i] = imageData.charCodeAt(i);
+        }
+        return bytes.buffer as ArrayBuffer;
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to process capture: %{public}s', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, 'Failed to decode image data: %{public}s', JSON.stringify(error));
     }
+    return new ArrayBuffer(0);
   }
 
   /**
@@ -547,34 +464,93 @@ export class RemoteControlService implements IRemoteControlService {
     }
 
     if (result.valid) {
-      this.remoteControlEnabled = true;
+      this.videoConfig.enabled = true;
     }
 
     hilog.info(DOMAIN, TAG, 'Validation result: %{public}s', status);
   }
 
   /**
-   * 发送设备信息
+   * 处理客户端信息命令
    */
+  private async handleClientInfoCommand(cmd: ConcreteCmd): Promise<void> {
+    const data = cmd.getData();
+    this.localDeviceCode = data.deviceCode || '';
+    this.localPassword = data.password || '';
+
+    if (this.deviceInfoCallback) {
+      this.deviceInfoCallback(this.localDeviceCode, this.localPassword);
+    }
+
+    hilog.info(DOMAIN, TAG, 'Device info: %{public}s', this.localDeviceCode);
+  }
+
+  /**
+   * 处理原始视频数据
+   * 流程：Worker 解压 -> CaptureProcessor 帧合并 -> 渲染
+   * @param data 压缩的视频数据
+   * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
+   */
+  private async onRawVideoData(data: ArrayBuffer, compressionMethod: number = 3): Promise<void> {
+    hilog.info(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
+      data.byteLength, compressionMethod);
+
+    try {
+      // 发送到 Worker 解压
+      const imageTask: ImageProcessTask = {
+        imageData: data,
+        compressionMethodOrdinal: compressionMethod
+      };
+
+      const result: ImageProcessResult = await this.workerRepository.processImage(imageTask);
+
+      hilog.info(DOMAIN, TAG, 'Decompressed - width: %{public}d, height: %{public}d, frameId: %{public}d',
+        result.width, result.height, result.frameId);
+
+      // 将 ArrayBuffer 转换为 Uint8Array
+      const imageBuffer = new Uint8Array(result.imageBuffer);
+
+      // 通过 CaptureProcessor 处理帧合并
+      const frameInfo: FrameInfo = {
+        id: result.frameId,
+        reset: result.isKeyFrame,
+        width: result.width,
+        height: result.height
+      };
+      const frameResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
+
+      // 渲染
+      if (this.screenCallback) {
+        const bufferData: ArrayBuffer = frameResult.buffer.buffer as ArrayBuffer;
+        const widthVal: number = frameResult.width;
+        const heightVal: number = frameResult.height;
+        this.screenCallback(
+          bufferData,
+          widthVal,
+          heightVal,
+          Date.now()
+        );
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to process video: %{public}s', JSON.stringify(error));
+    }
+  }
+
   private async sendClientInfo(): Promise<void> {
     if (this.getConnectionState() !== ConnectionState.CONNECTED) {
       return;
     }
 
     try {
-      hilog.info(DOMAIN, TAG, 'Sending client info to server...');
       const reqCliInfoCmd = CmdUtils.createReqCliInfoCmd(1, 'HarmonyOS');
       const encoded = CmdCodec.encode(reqCliInfoCmd);
       await this.connectionManager.send(encoded);
-      hilog.info(DOMAIN, TAG, 'Client info sent successfully');
+      hilog.info(DOMAIN, TAG, 'Client info sent');
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to send client info: %{public}s', JSON.stringify(error));
     }
   }
 
-  /**
-   * 发送心跳
-   */
   private async sendHeartbeat(): Promise<void> {
     if (this.getConnectionState() !== ConnectionState.CONNECTED) {
       return;
@@ -589,17 +565,11 @@ export class RemoteControlService implements IRemoteControlService {
     }
   }
 
-  /**
-   * 启动心跳
-   */
   private startHeartbeat(): void {
     this.heartbeatManager.init(this.config.heartbeatInterval);
     this.heartbeatManager.start();
   }
 
-  /**
-   * 停止心跳
-   */
   private stopHeartbeat(): void {
     this.heartbeatManager.stop();
   }

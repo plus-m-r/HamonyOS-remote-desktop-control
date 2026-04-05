@@ -2,25 +2,25 @@ import { ConcreteCmd } from '../../models/ConcreteCmd';
 
 /**
  * 协议处理器接口
- * 负责协议解析，不处理视频流
+ * 职责：只负责解析命令，不处理视频流
  */
 export interface IProtocolHandler {
   /**
-   * 处理接收到的数据
+   * 处理接收到的数据，只解析命令
+   * @param data 接收到的数据
+   * @returns 解析出的命令数组
    */
-  processData(data: ArrayBuffer): Promise<void>;
-
-  /**
-   * 处理数据并检查是否有视频流
-   * @param data 收到的数据
-   * @param onVideoStream 视频流回调（当无法解析为命令时触发）
-   */
-  processDataAndCheckVideo(data: ArrayBuffer, onVideoStream: (data: ArrayBuffer) => void): Promise<void>;
+  processData(data: ArrayBuffer): Promise<ConcreteCmd[]>;
 
   /**
    * 设置命令回调
    */
   setCommandCallback(callback: (cmd: ConcreteCmd) => Promise<void>): void;
+
+  /**
+   * 获取累积的缓冲区大小（用于调试）
+   */
+  getBufferSize(): number;
 
   /**
    * 清理资源

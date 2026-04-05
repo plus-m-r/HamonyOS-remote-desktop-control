@@ -24,6 +24,20 @@ import {
   WorkerErrorData
 } from '../models/CommonTypes';
 
+interface WorkerImageDataResult {
+  imageBuffer: ArrayBuffer;
+  width: number;
+  height: number;
+  frameId: number;
+  isKeyFrame: boolean;
+  tileCount: number;
+}
+
+interface WorkerProtocolParseResult {
+  remainingBuffer: ArrayBuffer;
+  commands: Record<string, Object>[];
+}
+
 export class WorkerRepositoryImpl implements IWorkerRepository {
   private imageWorker: worker.ThreadWorker | null = null;
   private protocolWorker: worker.ThreadWorker | null = null;
@@ -145,6 +159,24 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
     console.info('WorkerRepositoryImpl: Destroyed');
   }
 
+  private convertToImageProcessResult(data: WorkerImageDataResult): ImageProcessResult {
+    return {
+      imageBuffer: data.imageBuffer,
+      width: data.width,
+      height: data.height,
+      frameId: data.frameId,
+      isKeyFrame: data.isKeyFrame,
+      tileCount: data.tileCount
+    };
+  }
+
+  private convertToProtocolParseResult(data: WorkerProtocolParseResult): ProtocolParseResult {
+    return {
+      remainingBuffer: data.remainingBuffer,
+      commands: data.commands
+    };
+  }
+
   private handleWorkerMessage(message: WorkerMessage): void {
     const taskId = message.taskId;
     const type = message.type;
@@ -158,7 +190,8 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
         if (type === 'error') {
           imageTask.reject(new Error(error || 'Worker processing error'));
         } else if (data) {
-          imageTask.resolve(data as ImageProcessResult);
+          const workerData = data as WorkerImageDataResult;
+          imageTask.resolve(this.convertToImageProcessResult(workerData));
         } else {
           imageTask.reject(new Error('Invalid worker response'));
         }
@@ -174,7 +207,8 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
         if (type === 'error') {
           protocolTask.reject(new Error(error || 'Worker processing error'));
         } else if (data) {
-          protocolTask.resolve(data as ProtocolParseResult);
+          const workerData = data as WorkerProtocolParseResult;
+          protocolTask.resolve(this.convertToProtocolParseResult(workerData));
         } else {
           protocolTask.reject(new Error('Invalid worker response'));
         }

@@ -4,6 +4,8 @@ import { Compressor, CompressionMethod } from '../squeeze/Compressor';
 import { TileCache, NullTileCache } from '../squeeze/TileCache';
 import { Capture } from '../squeeze/Capture';
 
+const TAG = '[CaptureWorker]';
+
 // 定义消息类型
 interface CaptureTask {
   imageData: ArrayBuffer | string;
@@ -20,6 +22,9 @@ interface ImageDataResult {
   imageBuffer: ArrayBuffer;
   width: number;
   height: number;
+  frameId: number;
+  isKeyFrame: boolean;
+  tileCount: number;
 }
 
 interface ResultMessage {
@@ -30,20 +35,25 @@ interface ResultMessage {
   error?: string;
 }
 
-// 初始化Worker
+interface ResetCacheMessage {
+  type: 'resetCache';
+}
+
+// 初始化 Worker
 const workerPort = worker.workerPort;
 
-// 初始化tileCache（Worker 内部只初始化一次，复用）
+// Worker 内部状态 - 只管理 TileCache（用于解压缩），不管理帧缓存
 let tileCache: TileCache = new NullTileCache();
 
 // 处理消息
-workerPort.onmessage = (message: MessageEvent<CaptureTaskMessage>) => {
-  const data: CaptureTaskMessage = message.data;
-  
+workerPort.onmessage = (message: MessageEvent<CaptureTaskMessage | ResetCacheMessage>) => {
+  const data = message.data;
+
   if (data.type === 'processImage') {
-    const taskId = data.taskId;
-    
-    processCaptureTask(data.task)
+    const msg = data as CaptureTaskMessage;
+    const taskId = msg.taskId;
+
+    processCaptureTask(msg.task)
       .then(result => {
         const response: ResultMessage = {
           type: 'imageResult',
@@ -62,27 +72,36 @@ workerPort.onmessage = (message: MessageEvent<CaptureTaskMessage>) => {
         };
         workerPort.postMessage(response);
       });
+  } else if (data.type === 'resetCache') {
+    // 只重置 TileCache，不管理帧缓存
+    tileCache = new NullTileCache();
+    workerPort.postMessage({ type: 'cacheReset' });
   }
 };
 
 /**
  * 处理捕获任务
- * @param task 捕获任务
- * @returns Promise<{imageBuffer: ArrayBuffer, width: number, height: number}>
+ * 在 Worker 线程中执行，只负责：
+ * 1. 解压数据得到 Capture 对象
+ * 2. 创建图像缓冲区
+ * 3. 将 dirty tiles 绘制到缓冲区
+ *
+ * 注意：帧缓存（prevBuffer）由主线程的 CaptureProcessor 管理
+ * 这样即使 Worker 重启，帧缓存也不会丢失
  */
 async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
   const imageData = task.imageData;
   const compressionMethodOrdinal = task.compressionMethodOrdinal;
-  
+
   const payloadBuffer = imageData instanceof ArrayBuffer ? imageData : new ArrayBuffer(0);
-  
+
   if (payloadBuffer.byteLength === 0) {
     throw new Error('Empty payload buffer');
   }
-  
+
   // 1. 将 payload 转换为 MemByteBuffer
   const zippedData = MemByteBuffer.fromArray(new Uint8Array(payloadBuffer));
-  
+
   // 2. 映射压缩方法
   let squeezeMethod: CompressionMethod = CompressionMethod.NONE;
   switch (compressionMethodOrdinal) {
@@ -96,21 +115,32 @@ async function processCaptureTask(task: CaptureTask): Promise<ImageDataResult> {
       squeezeMethod = CompressionMethod.ZSTD;
       break;
   }
-  
+
   // 3. 获取压缩器并解压
   const compressor = Compressor.get(squeezeMethod);
   const capture = await compressor.decompress(tileCache, zippedData);
-  
-  // 4. 组装成完整图像缓冲区
-  const imageBuffer: Uint8Array = capture.createImageBuffer(null, 0, 0);
-  
-  // 5. 通知缓存处理完成
+
+  // 4. 创建图像缓冲区
+  const bufferSize = capture.width * capture.height * 4;
+  const imageBuffer = new Uint8Array(bufferSize);
+
+  // 5. 将 dirty tiles 绘制到缓冲区
+  capture.drawToBuffer(imageBuffer);
+
+  // 6. 通知缓存处理完成
   tileCache.onCaptureProcessed();
-  
-  const result: ImageDataResult = {
+
+  // 统计处理的瓦片数
+  const tileCount = capture.dirtyTiles.filter(t => t !== null).length;
+
+  console.info(`${TAG} Processed frame ${capture.id}: ${capture.width}x${capture.height}, ${tileCount} tiles, reset=${capture.reset}`);
+
+  return {
     imageBuffer: imageBuffer.buffer as ArrayBuffer,
     width: capture.width,
-    height: capture.height
+    height: capture.height,
+    frameId: capture.id,
+    isKeyFrame: capture.reset,
+    tileCount: tileCount
   };
-  return result;
 }

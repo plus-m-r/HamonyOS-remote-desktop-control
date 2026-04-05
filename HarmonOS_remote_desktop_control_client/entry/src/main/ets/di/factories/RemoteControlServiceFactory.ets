@@ -9,13 +9,14 @@ import {
 import { IConnectionManager } from '../../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../../services/protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../../services/interfaces/IHeartbeatManager';
+import { IWorkerRepository } from '../../repository/IWorkerRepository';
 import { configCenter } from '../../config/config';
 import { Injector, ServiceKeys } from '../Injector';
 import { HeartbeatManager } from '../../services/heartbeat/HeartbeatManager';
 
 /**
  * 远程控制服务工厂
- * 负责创建和配置 RemoteControlServiceRefactored 实例
+ * 负责创建和配置 RemoteControlServiceRefactored 的实例
  * 返回 IRemoteControlService 接口类型
  */
 export class RemoteControlServiceFactory {
@@ -31,6 +32,7 @@ export class RemoteControlServiceFactory {
     const injector = Injector.getInstance();
     const connectionManager = injector.resolve<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER);
     const protocolHandler = injector.resolve<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER);
+    const workerRepository = injector.resolve<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY);
     const heartbeatManager = new HeartbeatManager({
       interval: 3000,
       timeout: 5000
@@ -50,7 +52,8 @@ export class RemoteControlServiceFactory {
       config,
       connectionManager,
       protocolHandler,
-      heartbeatManager
+      heartbeatManager,
+      workerRepository
     );
 
     console.info('RemoteControlServiceFactory: Service created');

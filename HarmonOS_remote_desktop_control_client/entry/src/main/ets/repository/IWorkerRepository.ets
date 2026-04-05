@@ -18,12 +18,27 @@ export interface ImageProcessTask {
 }
 
 /**
- * 图像处理结果
+ * 单个瓦片数据
+ */
+export interface TileData {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  capture: Uint8Array;
+  singleLevel: number;
+}
+
+/**
+ * 图像处理结果（帧合并由主线程 CaptureProcessor 完成）
  */
 export interface ImageProcessResult {
   imageBuffer: ArrayBuffer;
   width: number;
   height: number;
+  frameId: number;
+  isKeyFrame: boolean;
+  tileCount: number;
 }
 
 /**

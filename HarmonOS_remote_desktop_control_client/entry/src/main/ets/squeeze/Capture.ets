@@ -42,26 +42,26 @@ export class Capture {
     const capWidth = this.width;
     const capHeight = this.height;
     const startTime = Date.now();
-    
+
     logManager.consoleLog(`[图像组装] 开始, 尺寸: ${capWidth}x${capHeight}, tiles: ${this.dirtyTiles.length}`);
-    
+
     // 安全检查：确保宽度和高度是合理的
     if (capWidth <= 0 || capHeight <= 0 || capWidth > 10000 || capHeight > 10000) {
       logManager.error(PERF_DOMAIN, PERF_TAG, 'Invalid dimensions: %{public}dx%{public}d', capWidth, capHeight);
       return new Uint8Array(0);
     }
-    
+
     const bufferSize = capWidth * capHeight * 4;
-    
+
     // 安全检查：确保bufferSize不会溢出
     if (bufferSize > 100000000) { // 100MB限制
       logManager.error(PERF_DOMAIN, PERF_TAG, 'Buffer size too large: %{public}d', bufferSize);
       return new Uint8Array(0);
     }
-    
+
     let buffer: Uint8Array;
     const bufferPool = BufferPool.getInstance();
-    
+
     // 优先使用对象池，其次复用前一帧缓冲区
     if (prevBuffer !== null && capWidth === prevWidth && capHeight === prevHeight && prevBuffer.length === bufferSize) {
       buffer = prevBuffer;
@@ -72,17 +72,31 @@ export class Capture {
       logManager.consoleLog(`[图像组装] 从对象池获取缓冲区, 大小: ${bufferSize}`);
     }
 
+    // 绘制到缓冲区
+    this.drawToBuffer(buffer);
+
+    return buffer;
+  }
+
+  /**
+   * 绘制 dirty tiles 到给定缓冲区
+   * @param buffer 目标缓冲区
+   */
+  drawToBuffer(buffer: Uint8Array): void {
+    const capWidth = this.width;
+    const capHeight = this.height;
     const capWidthByteSize = capWidth * 4;
-    
+    const bufferSize = capWidth * capHeight * 4;
+
     let processedTiles = 0;
     let skippedTiles = 0;
-    
+
     // 检查是否为灰度图像
-    const isGray = this.dirtyTiles.some(tile => 
-      tile !== null && tile !== undefined && tile.capture !== null && 
+    const isGray = this.dirtyTiles.some(tile =>
+      tile !== null && tile !== undefined && tile.capture !== null &&
       tile.capture.size() === tile.width * tile.height
     );
-    
+
     for (const tile of this.dirtyTiles) {
       if (tile === null || tile === undefined || tile.capture === null) {
         skippedTiles++;
@@ -92,27 +106,27 @@ export class Capture {
       const src = tile.capture.getInternal();
       const tileWidth = tile.width;
       const tileHeight = tile.height;
-      
+
       // 安全检查：确保tile位置在有效范围内
       if (tile.x < 0 || tile.y < 0 || tile.x >= capWidth || tile.y >= capHeight) {
         logManager.error(PERF_DOMAIN, PERF_TAG, 'Tile position out of bounds: (%{public}d, %{public}d)', tile.x, tile.y);
         continue;
       }
-      
+
       let destPos = tile.y * capWidthByteSize + tile.x * 4;
-      
+
       // 安全检查：确保destPos在有效范围内
       if (destPos < 0 || destPos >= bufferSize) {
         logManager.error(PERF_DOMAIN, PERF_TAG, 'Destination position out of bounds: %{public}d', destPos);
         continue;
       }
-      
+
       // 安全检查：确保数据长度在合理范围内
       if (src.length === 0) {
         logManager.warn(PERF_DOMAIN, PERF_TAG, 'Empty data for tile');
         continue;
       }
-      
+
       // 根据数据大小判断处理方式
       if (isGray) {
         this.processGrayData(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize, bufferSize);
@@ -122,15 +136,7 @@ export class Capture {
       processedTiles++;
     }
 
-    const elapsedTime = Date.now() - startTime;
-    logManager.consoleLog(`[图像组装] 完成, tiles: ${processedTiles}/${skippedTiles}, 耗时: ${elapsedTime}ms`);
-    
-    // 性能警告：如果处理时间超过16ms（60fps阈值）
-    if (elapsedTime > 16) {
-      logManager.warn(PERF_DOMAIN, PERF_TAG, 'Image assembly slow: %{public}dms for %{public}dx%{public}d', elapsedTime, capWidth, capHeight);
-    }
-    
-    return buffer;
+    logManager.consoleLog(`[drawToBuffer] 完成, tiles: ${processedTiles}/${skippedTiles}`);
   }
 
   /**
