@@ -1,3 +1,8 @@
+import hilog from '@ohos.hilog';
+
+const DOMAIN: number = 0xFF00;
+const TAG: string = 'MemByteBuffer';
+
 export class MemByteBuffer {
   private buffer: Uint8Array;
   private readOffset: number = 0;
@@ -56,16 +61,16 @@ export class MemByteBuffer {
 
   writeShort(value: number): void {
     this.ensureCapacity(2);
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + this.writeOffset);
-    view.setInt16(0, value, false);
-    this.writeOffset += 2;
+    this.buffer[this.writeOffset++] = (value >> 8) & 0xFF;
+    this.buffer[this.writeOffset++] = value & 0xFF;
   }
 
   writeInt(value: number): void {
     this.ensureCapacity(4);
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + this.writeOffset);
-    view.setInt32(0, value, false);
-    this.writeOffset += 4;
+    this.buffer[this.writeOffset++] = (value >> 24) & 0xFF;
+    this.buffer[this.writeOffset++] = (value >> 16) & 0xFF;
+    this.buffer[this.writeOffset++] = (value >> 8) & 0xFF;
+    this.buffer[this.writeOffset++] = value & 0xFF;
   }
 
   readByte(): number {
@@ -83,39 +88,58 @@ export class MemByteBuffer {
     if (this.readOffset + 2 > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + this.readOffset);
-    const result = view.getInt16(0, false);
-    this.readOffset += 2;
+    const b1 = this.buffer[this.readOffset++] & 0xFF;
+    const b2 = this.buffer[this.readOffset++] & 0xFF;
+    let result = (b1 << 8) | b2;
+    // 与 Java 的 DataInputStream.readShort() 一致
+    if ((result & 0x8000) !== 0) {
+      result = result - 0x10000;
+    }
+    hilog.error(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, result=%{public}d', b1.toString(16), b2.toString(16), result);
     return result;
   }
-
 
   readUnsignedShort(): number {
     if (this.readOffset + 2 > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + this.readOffset);
-    const result = view.getUint16(0, false);
-    this.readOffset += 2;
-    return result;
+    const b1 = this.buffer[this.readOffset++] & 0xFF;
+    const b2 = this.buffer[this.readOffset++] & 0xFF;
+    return (b1 << 8) | b2;
   }
 
   readInt(): number {
     if (this.readOffset + 4 > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + this.readOffset);
-    const result = view.getInt32(0, false);
-    this.readOffset += 4;
+    const b1 = this.buffer[this.readOffset++] & 0xFF;
+    const b2 = this.buffer[this.readOffset++] & 0xFF;
+    const b3 = this.buffer[this.readOffset++] & 0xFF;
+    const b4 = this.buffer[this.readOffset++] & 0xFF;
+    let result = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
     return result;
   }
 
   readBytes(length: number): Uint8Array {
+    hilog.error(DOMAIN, TAG, 'readBytes requested: %{public}d, available: %{public}d', length, this.writeOffset - this.readOffset);
     if (this.readOffset + length > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
     const result = this.buffer.subarray(this.readOffset, this.readOffset + length);
     this.readOffset += length;
+    return result;
+  }
+
+  /**
+   * 尽力读取最多 length 字节，不抛出异常
+   * 返回实际读取的字节数
+   */
+  readBytesBestEffort(length: number): Uint8Array {
+    const available = this.writeOffset - this.readOffset;
+    const toRead = Math.min(available, length);
+    hilog.error(DOMAIN, TAG, 'readBytesBestEffort requested: %{public}d, available: %{public}d, toRead: %{public}d', length, available, toRead);
+    const result = this.buffer.subarray(this.readOffset, this.readOffset + toRead);
+    this.readOffset += toRead;
     return result;
   }
 
@@ -134,7 +158,18 @@ export class MemByteBuffer {
     return this.readOffset;
   }
 
+  getWriteOffset(): number {
+    return this.writeOffset;
+  }
+
   reset(): void {
     this.readOffset = 0;
+  }
+
+  fill(count: number, value: number): void {
+    this.ensureCapacity(count);
+    for (let i = 0; i < count; i++) {
+      this.buffer[this.writeOffset++] = value & 0xFF;
+    }
   }
 }

@@ -7,7 +7,7 @@
  * 3. 模拟网络错误场景
  */
 
-import { BusinessError } from '@ohos.base';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 /**
  * Socket网络地址

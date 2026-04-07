@@ -14,8 +14,8 @@ import {
   HttpProgressCallback
 } from './IHttpRepository';
 import { DeviceCodeParams, CheckChunkParams, DefaultHttpHeaders } from '../models/CommonTypes';
-import http from '@ohos.net.http';
-import { BusinessError } from '@ohos.base';
+import { http } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 export class HttpRepositoryImpl implements IHttpRepository {
   private baseUrl: string = '';

@@ -2,12 +2,16 @@
  * Worker 仓库实现
  *
  * 实现 IWorkerRepository 接口，使用 Worker 进行后台处理
+ *
+ * 架构说明：
+ * - 解压缩：在主线程完成（需要 Context）
+ * - 帧处理（绘制瓦片）：在 Worker 线程完成
  */
 
 import {
   IWorkerRepository,
-  ImageProcessTask,
-  ImageProcessResult,
+  FrameProcessTask,
+  FrameProcessResult,
   ProtocolParseTask,
   ProtocolParseResult
 } from './IWorkerRepository';
@@ -24,7 +28,7 @@ import {
   WorkerErrorData
 } from '../models/CommonTypes';
 
-interface WorkerImageDataResult {
+interface WorkerFrameDataResult {
   imageBuffer: ArrayBuffer;
   width: number;
   height: number;
@@ -41,7 +45,7 @@ interface WorkerProtocolParseResult {
 export class WorkerRepositoryImpl implements IWorkerRepository {
   private imageWorker: worker.ThreadWorker | null = null;
   private protocolWorker: worker.ThreadWorker | null = null;
-  private pendingImageTasks: Map<number, ImageProcessTaskItem> = new Map();
+  private pendingFrameTasks: Map<number, ImageProcessTaskItem> = new Map();
   private pendingProtocolTasks: Map<number, ProtocolParseTaskItem> = new Map();
   private taskIdCounter: number = 0;
   private isInitialized: boolean = false;
@@ -78,7 +82,7 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
     }
   }
 
-  async processImage(task: ImageProcessTask): Promise<ImageProcessResult> {
+  async processFrame(task: FrameProcessTask): Promise<FrameProcessResult> {
     if (!this.isInitialized) {
       throw new Error('Worker repository not initialized');
     }
@@ -89,10 +93,10 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
 
     return new Promise((resolve, reject) => {
       const taskId = ++this.taskIdCounter;
-      this.pendingImageTasks.set(taskId, { resolve, reject });
+      this.pendingFrameTasks.set(taskId, { resolve, reject });
 
       const message: ImageTaskMessage = {
-        type: 'processImage',
+        type: 'processFrame',
         taskId,
         task
       };
@@ -125,23 +129,23 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
   }
 
   getPendingTaskCount(): number {
-    return this.pendingImageTasks.size + this.pendingProtocolTasks.size;
+    return this.pendingFrameTasks.size + this.pendingProtocolTasks.size;
   }
 
   getProcessingTaskCount(): number {
     // 简化实现，实际应该跟踪正在处理的任务
-    return this.pendingImageTasks.size + this.pendingProtocolTasks.size;
+    return this.pendingFrameTasks.size + this.pendingProtocolTasks.size;
   }
 
   destroy(): void {
     // 拒绝所有待处理的任务
-    this.pendingImageTasks.forEach((task) => {
+    this.pendingFrameTasks.forEach((task) => {
       task.reject(new Error('Worker repository destroyed'));
     });
     this.pendingProtocolTasks.forEach((task) => {
       task.reject(new Error('Worker repository destroyed'));
     });
-    this.pendingImageTasks.clear();
+    this.pendingFrameTasks.clear();
     this.pendingProtocolTasks.clear();
 
     // 终止 Worker
@@ -159,7 +163,7 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
     console.info('WorkerRepositoryImpl: Destroyed');
   }
 
-  private convertToImageProcessResult(data: WorkerImageDataResult): ImageProcessResult {
+  private convertToFrameProcessResult(data: WorkerFrameDataResult): FrameProcessResult {
     return {
       imageBuffer: data.imageBuffer,
       width: data.width,
@@ -183,20 +187,20 @@ export class WorkerRepositoryImpl implements IWorkerRepository {
     const data = message.data;
     const error = message.error;
 
-    if (type === 'imageResult' || type === 'error') {
-      const imageTask = this.pendingImageTasks.get(taskId);
-      if (imageTask) {
-        this.pendingImageTasks.delete(taskId);
+    if (type === 'frameResult' || type === 'error') {
+      const frameTask = this.pendingFrameTasks.get(taskId);
+      if (frameTask) {
+        this.pendingFrameTasks.delete(taskId);
         if (type === 'error') {
-          imageTask.reject(new Error(error || 'Worker processing error'));
+          frameTask.reject(new Error(error || 'Worker processing error'));
         } else if (data) {
-          const workerData = data as WorkerImageDataResult;
-          imageTask.resolve(this.convertToImageProcessResult(workerData));
+          const workerData = data as WorkerFrameDataResult;
+          frameTask.resolve(this.convertToFrameProcessResult(workerData));
         } else {
-          imageTask.reject(new Error('Invalid worker response'));
+          frameTask.reject(new Error('Invalid worker response'));
         }
       } else {
-        console.warn('WorkerRepositoryImpl: Unknown image task ID', taskId);
+        console.warn('WorkerRepositoryImpl: Unknown frame task ID', taskId);
       }
     }
 

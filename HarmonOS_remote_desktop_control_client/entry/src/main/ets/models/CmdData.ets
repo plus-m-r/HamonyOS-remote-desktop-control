@@ -23,6 +23,9 @@ export class CmdData {
   maxFps: number = 0;
   compressionMethod: number = 0;
   compressionLevel: number = 0;
+  useCache: boolean = true;
+  cacheMaxSize: number = 1000;
+  cachePurgeSize: number = 500;
   screenIndex: number = 0;
   captureOp: number = 0;
   clipboards: ClipboardData[] = [];
@@ -58,6 +61,9 @@ export class CmdData {
     if (obj['maxFps'] !== undefined) data.maxFps = Number(obj['maxFps']);
     if (obj['compressionMethod'] !== undefined) data.compressionMethod = Number(obj['compressionMethod']);
     if (obj['compressionLevel'] !== undefined) data.compressionLevel = Number(obj['compressionLevel']);
+    if (obj['useCache'] !== undefined) data.useCache = Boolean(obj['useCache']);
+    if (obj['cacheMaxSize'] !== undefined) data.cacheMaxSize = Number(obj['cacheMaxSize']);
+    if (obj['cachePurgeSize'] !== undefined) data.cachePurgeSize = Number(obj['cachePurgeSize']);
     if (obj['screenIndex'] !== undefined) data.screenIndex = Number(obj['screenIndex']);
     if (obj['captureOp'] !== undefined) data.captureOp = Number(obj['captureOp']);
     if (obj['clipboards'] !== undefined) data.clipboards = obj['clipboards'] as ClipboardData[];

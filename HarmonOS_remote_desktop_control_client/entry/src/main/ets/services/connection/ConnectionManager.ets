@@ -1,8 +1,8 @@
 import { IConnectionManager } from './IConnectionManager';
 import { ConnectionState } from '../../models/DeviceInfo';
 import { ITcpRepository, TcpConnectionConfig, TcpConnectionState, TcpErrorCallback } from '../../repository/ITcpRepository';
-import { BusinessError } from '@ohos.base';
-import hilog from '@ohos.hilog';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0xFF00;
 const TAG: string = 'ConnectionManager';

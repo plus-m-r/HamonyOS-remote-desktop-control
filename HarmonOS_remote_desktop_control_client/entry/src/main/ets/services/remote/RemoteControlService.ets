@@ -30,12 +30,16 @@ import {
 import { IConnectionManager } from '../connection/IConnectionManager';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../interfaces/IHeartbeatManager';
-import { IWorkerRepository, ImageProcessTask, ImageProcessResult } from '../../repository/IWorkerRepository';
-import { CaptureProcessor, FrameProcessResult, FrameInfo } from '../../processor/CaptureProcessor';
+import { IWorkerRepository, FrameProcessTask, FrameProcessResult } from '../../repository/IWorkerRepository';
+import { CaptureProcessor, FrameProcessResult as CaptureFrameProcessResult, FrameInfo } from '../../processor/CaptureProcessor';
 import { CmdCodec } from '../../network/CmdCodec';
 import { ConcreteCmd } from '../../models/ConcreteCmd';
 import { CmdType } from '../../models/CmdProtocol';
 import { CmdUtils } from '../../models/CmdFactory';
+import { MemByteBuffer } from '../../squeeze/MemByteBuffer';
+import { Compressor, CompressionMethod } from '../../squeeze/Compressor';
+import { TileCache, NullTileCache, RegularTileCache } from '../../squeeze/TileCache';
+import { Capture } from '../../squeeze/Capture';
 import hilog from '@ohos.hilog';
 
 const DOMAIN: number = 0xFF00;
@@ -62,11 +66,18 @@ export class RemoteControlService implements IRemoteControlService {
   // 帧处理器
   private captureProcessor: CaptureProcessor = new CaptureProcessor();
 
+  // Tile 缓存（用于解压缩）
+  private tileCache: TileCache = new NullTileCache();
+
   // 视频流配置
   private videoConfig: VideoStreamConfig = {
     enabled: false,
     compressionMethod: 3 // ZSTD
   };
+
+  // 数据处理队列，确保按顺序处理
+  private dataQueue: ArrayBuffer[] = [];
+  private isProcessingData: boolean = false;
 
   // 设备信息
   private localDeviceCode: string = '';
@@ -150,16 +161,44 @@ export class RemoteControlService implements IRemoteControlService {
 
   /**
    * 处理接收到的数据
-   * 数据可能来自：
-   * 1. ProtocolHandler 解析出的命令 (包括 CmdCapture)
-   * 2. 残留数据 (不应发生)
-   *
-   * 注意: CmdCapture 命令通过 commandCallback -> processCommand -> handleCaptureData 处理
-   *       所有视频数据都通过 CmdCapture 命令传递，不再有独立的"原始视频数据"流
+   * 使用队列确保按顺序处理，避免并发问题
    */
   private async handleReceivedData(data: ArrayBuffer): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', data.byteLength);
+    
+    // 将数据加入队列
+    this.dataQueue.push(data);
+    
+    // 如果没有正在处理，开始处理队列
+    if (!this.isProcessingData) {
+      await this.processDataQueue();
+    }
+  }
 
+  /**
+   * 处理数据队列
+   */
+  private async processDataQueue(): Promise<void> {
+    if (this.isProcessingData || this.dataQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingData = true;
+
+    try {
+      while (this.dataQueue.length > 0) {
+        const data = this.dataQueue.shift()!;
+        await this.processSingleData(data);
+      }
+    } finally {
+      this.isProcessingData = false;
+    }
+  }
+
+  /**
+   * 处理单个数据块
+   */
+  private async processSingleData(data: ArrayBuffer): Promise<void> {
     // 尝试让 ProtocolHandler 解析命令
     // CmdCapture 命令会通过 commandCallback -> handleCaptureData 处理
     const commands = await this.protocolHandler.processData(data);
@@ -345,6 +384,9 @@ export class RemoteControlService implements IRemoteControlService {
       case CmdType.CaptureConfig:
         this.handleCaptureConfigCommand(cmd);
         break;
+      case CmdType.CompressorConfig:
+        this.handleCompressorConfigCommand(cmd);
+        break;
       case CmdType.ResOpen:
         this.handleValidationResult(cmd);
         break;
@@ -375,6 +417,8 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.info(DOMAIN, TAG, 'Remote screen capture started');
       this.videoConfig.enabled = true;
       this.captureProcessor.reset();
+      // TileCache 将通过 CompressorConfig 命令配置
+      hilog.info(DOMAIN, TAG, 'Waiting for CompressorConfig to set up tile cache');
     } else {
       hilog.error(DOMAIN, TAG, 'Remote screen capture failed: %{public}s', status);
       this.videoConfig.enabled = false;
@@ -389,8 +433,43 @@ export class RemoteControlService implements IRemoteControlService {
     const width = data.width || 0;
     const height = data.height || 0;
     const fps = data.fps || 0;
+    const captureFrequency = data.captureFrequency || 0;
+    const quality = data.quality || 0;
+    const maxFps = data.maxFps || 0;
 
-    hilog.info(DOMAIN, TAG, 'CaptureConfig - width: %{public}d, height: %{public}d, fps: %{public}d', width, height, fps);
+    hilog.info(DOMAIN, TAG, 'CaptureConfig - width: %{public}d, height: %{public}d, fps: %{public}d, captureFrequency: %{public}d, quality: %{public}d, maxFps: %{public}d', 
+      width, height, fps, captureFrequency, quality, maxFps);
+    
+    // 重置帧处理器以适配新配置
+    if (width > 0 && height > 0) {
+      this.captureProcessor.reset();
+    }
+  }
+
+  /**
+   * 处理压缩器配置
+   */
+  private handleCompressorConfigCommand(cmd: ConcreteCmd): void {
+    const data = cmd.getData();
+    const compressionMethod = data.compressionMethod || 3;
+    const useCache = data.useCache !== false;
+    const cacheMaxSize = data.cacheMaxSize || 1000;
+    const cachePurgeSize = data.cachePurgeSize || 500;
+
+    hilog.info(DOMAIN, TAG, 'CompressorConfig - compressionMethod: %{public}d, useCache: %{public}s, cacheMaxSize: %{public}d, cachePurgeSize: %{public}d', 
+      compressionMethod, useCache ? 'true' : 'false', cacheMaxSize, cachePurgeSize);
+
+    // 更新压缩方法配置
+    this.videoConfig.compressionMethod = compressionMethod;
+
+    // 根据配置创建对应的 TileCache
+    if (useCache) {
+      this.tileCache = new RegularTileCache(cacheMaxSize, cachePurgeSize);
+      hilog.info(DOMAIN, TAG, 'Using RegularTileCache - maxSize: %{public}d, purgeSize: %{public}d', cacheMaxSize, cachePurgeSize);
+    } else {
+      this.tileCache = new NullTileCache();
+      hilog.info(DOMAIN, TAG, 'Using NullTileCache (no cache)');
+    }
   }
 
   /**
@@ -487,7 +566,9 @@ export class RemoteControlService implements IRemoteControlService {
 
   /**
    * 处理原始视频数据
-   * 流程：获取 prevBuffer -> Worker 解压 + 绘制 -> CaptureProcessor 更新 prevBuffer -> 渲染
+   * 架构：
+   * - 解压缩：在主线程完成（需要 Context）
+   * - 帧合并：在主线程完成
    * @param data 压缩的视频数据
    * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
    */
@@ -498,28 +579,56 @@ export class RemoteControlService implements IRemoteControlService {
     try {
       const prevParams = this.captureProcessor.getPrevBufferParams();
 
-      const imageTask: ImageProcessTask = {
-        imageData: data,
-        compressionMethodOrdinal: compressionMethod,
-        prevBuffer: prevParams.buffer,
-        prevWidth: prevParams.width,
-        prevHeight: prevParams.height
-      };
+      // 1. 将 payload 转换为 MemByteBuffer
+      const zippedData = MemByteBuffer.fromArray(new Uint8Array(data));
 
-      const result: ImageProcessResult = await this.workerRepository.processImage(imageTask);
+      // 2. 映射压缩方法
+      let squeezeMethod: CompressionMethod = CompressionMethod.NONE;
+      switch (compressionMethod) {
+        case 1:
+          squeezeMethod = CompressionMethod.ZIP;
+          break;
+        case 2:
+          squeezeMethod = CompressionMethod.XZ;
+          break;
+        case 3:
+          squeezeMethod = CompressionMethod.ZSTD;
+          break;
+      }
 
-      hilog.info(DOMAIN, TAG, 'Decompressed - width: %{public}d, height: %{public}d, frameId: %{public}d, reused: %{public}s',
-        result.width, result.height, result.frameId, (!result.isKeyFrame && prevParams.buffer !== null).toString());
+      // 3. 获取压缩器并解压
+      const compressor = Compressor.get(squeezeMethod);
+      const capture: Capture = await compressor.decompress(this.tileCache, zippedData);
 
-      const imageBuffer = new Uint8Array(result.imageBuffer);
+      // 决定是否复用 prevBuffer
+      const width = capture.width;
+      const height = capture.height;
+      const bufferSize = width * height * 4;
+      const reset = capture.reset;
+
+      let imageBuffer: Uint8Array;
+
+      if (!reset && prevParams.buffer !== null && prevParams.width === width && prevParams.height === height) {
+        // 增量帧且尺寸匹配：复用 prevBuffer
+        imageBuffer = new Uint8Array(prevParams.buffer);
+      } else {
+        // 完整帧或尺寸不匹配：创建新缓冲区
+        imageBuffer = new Uint8Array(bufferSize);
+      }
+
+      // 将 dirty tiles 绘制到缓冲区
+      capture.drawToBuffer(imageBuffer);
+
+      // 通知缓存处理完成
+      this.tileCache.onCaptureProcessed();
 
       const frameInfo: FrameInfo = {
-        id: result.frameId,
-        reset: result.isKeyFrame,
-        width: result.width,
-        height: result.height
+        id: capture.id,
+        reset: reset,
+        width: width,
+        height: height
       };
-      const frameResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
+      const frameResult: CaptureFrameProcessResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
 
       if (this.screenCallback) {
         const bufferData: ArrayBuffer = frameResult.buffer.buffer as ArrayBuffer;
@@ -533,7 +642,10 @@ export class RemoteControlService implements IRemoteControlService {
         );
       }
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to process video: %{public}s', JSON.stringify(error));
+      hilog.error(DOMAIN, TAG, 'Failed to process video: %{public}s', error instanceof Error ? error.message : String(error));
+      if (error instanceof Error && error.stack) {
+        hilog.error(DOMAIN, TAG, 'Error stack: %{public}s', error.stack);
+      }
     }
   }
 

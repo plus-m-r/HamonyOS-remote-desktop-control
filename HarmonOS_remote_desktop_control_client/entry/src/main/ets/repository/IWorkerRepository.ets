@@ -8,14 +8,17 @@ import { BaseService } from '../di/BaseService';
  * 1. 单元测试时 Mock Worker 行为
  * 2. 控制 Worker 执行（同步/异步）
  * 3. 模拟 Worker 错误场景
+ *
+ * 架构说明：
+ * - 解压缩：在主线程完成（需要 Context）
+ * - 帧处理（绘制瓦片）：在 Worker 线程完成
  */
 
 /**
- * 图像处理任务
+ * 帧处理任务（解压缩已在主线程完成）
  */
-export interface ImageProcessTask {
-  imageData: ArrayBuffer | string;
-  compressionMethodOrdinal: number;
+export interface FrameProcessTask {
+  captureData: ArrayBuffer;
   prevBuffer: ArrayBuffer | null;
   prevWidth: number;
   prevHeight: number;
@@ -34,9 +37,9 @@ export interface TileData {
 }
 
 /**
- * 图像处理结果（帧合并由主线程 CaptureProcessor 完成）
+ * 帧处理结果（帧合并由主线程 CaptureProcessor 完成）
  */
-export interface ImageProcessResult {
+export interface FrameProcessResult {
   imageBuffer: ArrayBuffer;
   width: number;
   height: number;
@@ -71,11 +74,11 @@ export interface IWorkerRepository extends BaseService {
   init(): void;
 
   /**
-   * 处理图像数据
-   * @param task 图像处理任务
-   * @returns Promise<ImageProcessResult>
+   * 处理帧数据（解压缩已在主线程完成）
+   * @param task 帧处理任务
+   * @returns Promise<FrameProcessResult>
    */
-  processImage(task: ImageProcessTask): Promise<ImageProcessResult>;
+  processFrame(task: FrameProcessTask): Promise<FrameProcessResult>;
 
   /**
    * 解析协议数据

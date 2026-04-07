@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import { ServiceProvider } from '../di/ServiceProvider';
 import { appStateManager } from '../state/AppStateManager';
 import { ContextManager } from '../utils/ContextManager';
+import { GlobalContext } from '../utils/GlobalContext';
 
 // 日志域标识，用于区分不同模块的日志输出
 const DOMAIN = 0x0000;
@@ -37,6 +38,9 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    
+    // 配置全局 Context（@ohos/commons-compress 需要）
+    GlobalContext.getContext().setObject("context", this.context);
     
     // 初始化 ContextManager，保存应用上下文供全局使用
     // ContextManager 是一个单例类，用于在应用各处获取 Ability 上下文

@@ -19,8 +19,8 @@ import {
   SocketSendOptionsInternal,
   TcpNetAddress
 } from './ITcpRepository';
-import socket from '@ohos.net.socket';
-import { BusinessError } from '@ohos.base';
+import { socket } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 export class TcpRepositoryImpl implements ITcpRepository {
   private tcpSocket: socket.TCPSocket | null = null;

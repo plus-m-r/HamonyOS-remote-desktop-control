@@ -148,17 +148,17 @@ export class Injector {
       const FileServiceFactory = fileModule.FileServiceFactory;
 
       // 注册服务工厂 - 返回接口类型
-      // 注意：注册顺序很重要，因为 RemoteControlService 依赖于 ConnectionManager、ProtocolHandler 和 WorkerRepository
+      // 注意：注册顺序很重要，因为其他服务依赖于 WorkerRepository
+      this.registerFactory<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY,
+        () => WorkerRepositoryFactory.create()
+      );
+
       this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER,
         () => ConnectionManagerFactory.create()
       );
 
       this.registerFactory<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER,
         () => ProtocolHandlerFactory.create()
-      );
-
-      this.registerFactory<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY,
-        () => WorkerRepositoryFactory.create()
       );
 
       this.registerFactory<IRemoteControlService>(ServiceKeys.REMOTE_CONTROL_SERVICE,

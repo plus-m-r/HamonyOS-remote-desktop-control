@@ -353,12 +353,12 @@ export class CmdCodec {
    * 编码屏幕捕获配置命令
    */
   private static encodeCaptureConfigCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    const width = cmdData.width as number || 0;
-    const height = cmdData.height as number || 0;
-    const fps = cmdData.fps as number || 0;
+    const quantization = cmdData.quality as number || 6; // Gray8Bits enum (0-6)
+    const captureTick = cmdData.captureFrequency as number || 30;
+    const captureColors = (cmdData.maxFps as number) === 1 ? 1 : 0; // use maxFps as flag for colors
     
-    // 计算数据长度：width(4) + height(4) + fps(4)
-    const dataLength = 4 + 4 + 4;
+    // 计算数据长度：quantization(4) + captureTick(4) + captureColors(2)
+    const dataLength = 4 + 4 + 2;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -378,16 +378,16 @@ export class CmdCodec {
     view.setUint32(offset, dataLength, false);
     offset += 4;
     
-    // width
-    view.setInt32(offset, width, false);
+    // quantization (int enum)
+    view.setInt32(offset, quantization, false);
     offset += 4;
     
-    // height
-    view.setInt32(offset, height, false);
+    // captureTick (int)
+    view.setInt32(offset, captureTick, false);
     offset += 4;
     
-    // fps
-    view.setInt32(offset, fps, false);
+    // captureColors (short, 1=true, 0=false)
+    view.setInt16(offset, captureColors, false);
     
     return buffer;
   }
@@ -397,10 +397,12 @@ export class CmdCodec {
    */
   private static encodeCompressorConfigCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const compressionMethod = cmdData.compressionMethod as number || 0;
-    const compressionLevel = cmdData.compressionLevel as number || 0;
+    const useCache = (cmdData.useCache as boolean) !== false ? 1 : 0;
+    const cacheMaxSize = cmdData.cacheMaxSize as number || 1000;
+    const cachePurgeSize = cmdData.cachePurgeSize as number || 500;
     
-    // 计算数据长度：compressionMethod(4) + compressionLevel(4)
-    const dataLength = 4 + 4;
+    // 计算数据长度：compressionMethod(4) + useCache(1) + cacheMaxSize(4) + cachePurgeSize(4) = 13
+    const dataLength = 4 + 1 + 4 + 4;
     
     // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
     const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
@@ -420,12 +422,20 @@ export class CmdCodec {
     view.setUint32(offset, dataLength, false);
     offset += 4;
     
-    // compressionMethod
+    // compressionMethod (int)
     view.setInt32(offset, compressionMethod, false);
     offset += 4;
     
-    // compressionLevel
-    view.setInt32(offset, compressionLevel, false);
+    // useCache (byte)
+    view.setUint8(offset, useCache);
+    offset += 1;
+    
+    // cacheMaxSize (int)
+    view.setInt32(offset, cacheMaxSize, false);
+    offset += 4;
+    
+    // cachePurgeSize (int)
+    view.setInt32(offset, cachePurgeSize, false);
     
     return buffer;
   }
@@ -934,6 +944,8 @@ export class CmdCodec {
    */
   static decode(buffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
+      console.info('CmdCodec.decode: Starting, buffer size=' + buffer.byteLength);
+      
       if (buffer.byteLength < 6) {
         console.error('CmdCodec: Buffer too short for decoding');
         return undefined;
@@ -944,6 +956,8 @@ export class CmdCodec {
       // 检查魔数，必须为二进制格式
       const magicNumber = view.getUint8(0);
       
+      console.info('CmdCodec.decode: magic=' + magicNumber);
+      
       if (magicNumber !== 100) {
         console.error('CmdCodec: Invalid magic number, only binary format is supported');
         return undefined;
@@ -953,13 +967,18 @@ export class CmdCodec {
       const cmdTypeOrdinal = view.getUint8(1);
       const dataLength = view.getUint32(2, false);
       
+      console.info('CmdCodec.decode: cmdTypeOrdinal=' + cmdTypeOrdinal + ', dataLength=' + dataLength);
+      
       if (buffer.byteLength < 6 + dataLength) {
-        console.error('CmdCodec: Binary format incomplete data');
+        console.error('CmdCodec: Binary format incomplete data, need ' + (6 + dataLength) + ', have ' + buffer.byteLength);
         return undefined;
       }
       
       // 根据命令类型解码
-      return CmdCodec.decodeBinaryCommand(cmdTypeOrdinal, buffer.slice(6, 6 + dataLength));
+      console.info('CmdCodec.decode: Calling decodeBinaryCommand...');
+      const result = CmdCodec.decodeBinaryCommand(cmdTypeOrdinal, buffer.slice(6, 6 + dataLength));
+      console.info('CmdCodec.decode: decodeBinaryCommand returned: ' + (result ? 'success' : 'undefined'));
+      return result;
     } catch (error) {
       console.error('CmdCodec: Failed to decode command', error);
       return undefined;
@@ -1063,8 +1082,10 @@ export class CmdCodec {
    */
   private static decodeResCliInfoCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
+      console.info('CmdCodec.decodeResCliInfoCmd: Starting, dataBuffer size=' + dataBuffer.byteLength);
+      
       if (dataBuffer.byteLength < 8) {
-        console.error('CmdCodec: ResCliInfo data buffer too short');
+        console.error('CmdCodec: ResCliInfo data buffer too short, need at least 8, have ' + dataBuffer.byteLength);
         return undefined;
       }
 
@@ -1074,25 +1095,44 @@ export class CmdCodec {
       // 读取 deviceCode 长度
       const deviceCodeLength = view.getUint32(offset, false);
       offset += 4;
+      console.info('CmdCodec.decodeResCliInfoCmd: deviceCodeLength=' + deviceCodeLength);
+
+      // 检查是否有足够的字节
+      if (offset + deviceCodeLength > dataBuffer.byteLength) {
+        console.error('CmdCodec: ResCliInfo deviceCode incomplete, need ' + deviceCodeLength + ' bytes at offset ' + offset);
+        return undefined;
+      }
 
       // 读取 deviceCode
       const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
       const decoder = util.TextDecoder.create('utf-8');
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
+      console.info('CmdCodec.decodeResCliInfoCmd: deviceCode=' + deviceCode);
 
       // 读取 password 长度
+      if (offset + 4 > dataBuffer.byteLength) {
+        console.error('CmdCodec: ResCliInfo password length incomplete');
+        return undefined;
+      }
       const passwordLength = view.getUint32(offset, false);
       offset += 4;
+      console.info('CmdCodec.decodeResCliInfoCmd: passwordLength=' + passwordLength);
 
       // 读取 password
+      if (offset + passwordLength > dataBuffer.byteLength) {
+        console.error('CmdCodec: ResCliInfo password incomplete');
+        return undefined;
+      }
       const passwordBytes = dataBuffer.slice(offset, offset + passwordLength);
       const password = decoder.decodeToString(new Uint8Array(passwordBytes));
 
       console.log(`CmdCodec: Decoded ResCliInfo command - deviceCode: ${deviceCode}, password: ${password}`);
 
       // 创建命令对象
-      return CmdUtils.createResCliInfoCmd(deviceCode, password);
+      const result = CmdUtils.createResCliInfoCmd(deviceCode, password);
+      console.info('CmdCodec.decodeResCliInfoCmd: Created command successfully');
+      return result;
     } catch (error) {
       console.error('CmdCodec: Failed to decode ResCliInfo command', error);
       return undefined;
@@ -1259,18 +1299,24 @@ export class CmdCodec {
    */
   private static decodeCaptureConfigCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 12) {
+      if (dataBuffer.byteLength < 10) {
         console.error('CmdCodec: CaptureConfig data buffer too short');
         return undefined;
       }
 
       const view = new DataView(dataBuffer);
-      const width = view.getInt32(0, false);
-      const height = view.getInt32(4, false);
-      const fps = view.getInt32(8, false);
+      let offset = 0;
+      
+      const quantization = view.getInt32(offset, false);
+      offset += 4;
+      
+      const captureTick = view.getInt32(offset, false);
+      offset += 4;
+      
+      const captureColors = view.getInt16(offset, false) === 1;
 
-      // 创建命令对象
-      return CmdUtils.createCaptureConfigCmd('', width, height, fps);
+      // 创建命令对象 - 使用 quality 存储 quantization, captureFrequency 存储 captureTick, maxFps 作为 colors 标志
+      return CmdUtils.createCaptureConfigCmd('', captureTick, quantization, captureColors ? 1 : 0);
     } catch (error) {
       console.error('CmdCodec: Failed to decode CaptureConfig command', error);
       return undefined;
@@ -1283,27 +1329,39 @@ export class CmdCodec {
    */
   private static decodeCompressorConfigCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 8) {
+      if (dataBuffer.byteLength < 13) {
         console.error('CmdCodec: CompressorConfig data buffer too short');
         return undefined;
       }
 
       const view = new DataView(dataBuffer);
-      const compressionMethod = view.getInt32(0, false);
-      const compressionLevel = view.getInt32(4, false);
+      let offset = 0;
+      
+      const compressionMethod = view.getInt32(offset, false);
+      offset += 4;
+      
+      const useCache = view.getUint8(offset) === 1;
+      offset += 1;
+      
+      const cacheMaxSize = view.getInt32(offset, false);
+      offset += 4;
+      
+      const cachePurgeSize = view.getInt32(offset, false);
 
-      // 将数字转换为CompressionMethod枚举
+      // 将数字转换为CompressionMethod枚举（与Java端一致：0=NONE, 1=ZIP, 2=XZ, 3=ZSTD）
       let compressionMethodEnum: CompressionMethod = CompressionMethod.ZSTD;
-      if (compressionMethod === 1) {
-        compressionMethodEnum = CompressionMethod.ZSTD;
+      if (compressionMethod === 0) {
+        compressionMethodEnum = CompressionMethod.NONE;
+      } else if (compressionMethod === 1) {
+        compressionMethodEnum = CompressionMethod.ZIP;
       } else if (compressionMethod === 2) {
         compressionMethodEnum = CompressionMethod.XZ;
       } else if (compressionMethod === 3) {
-        compressionMethodEnum = CompressionMethod.ZIP;
+        compressionMethodEnum = CompressionMethod.ZSTD;
       }
       
       // 创建命令对象
-      return CmdUtils.createCompressorConfigCmd('', compressionMethodEnum, compressionLevel);
+      return CmdUtils.createCompressorConfigCmd('', compressionMethodEnum, 0, useCache, cacheMaxSize, cachePurgeSize);
     } catch (error) {
       console.error('CmdCodec: Failed to decode CompressorConfig command', error);
       return undefined;
@@ -1685,36 +1743,52 @@ export class CmdCodec {
     let remainingBuffer = buffer;
     
     try {
+      console.info('CmdCodec.extractCommands: Starting, buffer size: ' + remainingBuffer.byteLength);
+      
       while (remainingBuffer.byteLength >= 6) {
         const view = new DataView(remainingBuffer);
         const magicNumber = view.getUint8(0);
         
+        console.info('CmdCodec.extractCommands: Loop, magic=' + magicNumber + ', remaining=' + remainingBuffer.byteLength);
+        
         // 只处理二进制格式
         if (magicNumber === 100) {
           // 二进制格式
+          const cmdTypeOrdinal = view.getUint8(1);
           const dataLength = view.getUint32(2, false);
           const cmdLength = 6 + dataLength; // 魔数(1) + 命令类型(1) + 数据长度(4) + 数据体
           
+          console.info('CmdCodec.extractCommands: Found command - typeOrdinal=' + cmdTypeOrdinal + ', dataLength=' + dataLength + ', cmdLength=' + cmdLength);
+          
           // 检查是否有完整的数据包
           if (remainingBuffer.byteLength < cmdLength) {
+            console.info('CmdCodec.extractCommands: Not enough data, need ' + cmdLength + ', have ' + remainingBuffer.byteLength);
             break;
           }
           
           // 提取单个命令的数据
           const cmdBuffer = remainingBuffer.slice(0, cmdLength);
+          console.info('CmdCodec.extractCommands: Decoding command buffer...');
           const cmd = CmdCodec.decode(cmdBuffer);
           
           if (cmd) {
+            console.info('CmdCodec.extractCommands: Decoded command, type=' + cmd.type);
             commands.push(cmd);
+          } else {
+            console.error('CmdCodec.extractCommands: Failed to decode command');
           }
           
           // 移动到下一个命令
           remainingBuffer = remainingBuffer.slice(cmdLength);
+          console.info('CmdCodec.extractCommands: Moved to next, remaining=' + remainingBuffer.byteLength);
         } else {
           // 不是二进制格式，跳过该字节
+          console.warn('CmdCodec.extractCommands: Invalid magic ' + magicNumber + ', skipping 1 byte');
           remainingBuffer = remainingBuffer.slice(1);
         }
       }
+      
+      console.info('CmdCodec.extractCommands: Done, extracted ' + commands.length + ' commands, remaining=' + remainingBuffer.byteLength);
     } catch (error) {
       console.error('CmdCodec: Failed to extract commands', error);
     }

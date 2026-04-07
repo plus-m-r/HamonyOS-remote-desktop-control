@@ -257,6 +257,16 @@ export default function UtilsUnitTest() {
       expect(buffer.getReadOffset()).assertEqual(1);
     });
     
+    it('getWriteOffset', () => {
+      expect(buffer.getWriteOffset()).assertEqual(0);
+      
+      buffer.writeByte(1);
+      expect(buffer.getWriteOffset()).assertEqual(1);
+      
+      buffer.writeShort(2);
+      expect(buffer.getWriteOffset()).assertEqual(3);
+    });
+    
     it('reset', () => {
       buffer.writeByte(1);
       buffer.writeByte(2);
@@ -265,6 +275,56 @@ export default function UtilsUnitTest() {
       
       buffer.reset();
       expect(buffer.getReadOffset()).assertEqual(0);
+    });
+    
+    it('fill 方法', () => {
+      buffer.fill(5, 0xAA);
+      expect(buffer.size()).assertEqual(5);
+      
+      buffer.reset();
+      for (let i = 0; i < 5; i++) {
+        expect(buffer.readByte()).assertEqual(0xAA);
+      }
+    });
+    
+    it('fill 方法多次调用', () => {
+      buffer.fill(2, 0x11);
+      buffer.fill(3, 0x22);
+      expect(buffer.size()).assertEqual(5);
+      
+      buffer.reset();
+      expect(buffer.readByte()).assertEqual(0x11);
+      expect(buffer.readByte()).assertEqual(0x11);
+      expect(buffer.readByte()).assertEqual(0x22);
+      expect(buffer.readByte()).assertEqual(0x22);
+      expect(buffer.readByte()).assertEqual(0x22);
+    });
+    
+    it('readShort 负数读取', () => {
+      buffer.writeShort(-12345);
+      expect(buffer.size()).assertEqual(2);
+      
+      buffer.reset();
+      const value = buffer.readShort();
+      expect(value).assertEqual(-12345);
+    });
+    
+    it('readShort 最小值 -32768', () => {
+      buffer.writeShort(-32768);
+      expect(buffer.size()).assertEqual(2);
+      
+      buffer.reset();
+      const value = buffer.readShort();
+      expect(value).assertEqual(-32768);
+    });
+    
+    it('readShort 最大值 32767', () => {
+      buffer.writeShort(32767);
+      expect(buffer.size()).assertEqual(2);
+      
+      buffer.reset();
+      const value = buffer.readShort();
+      expect(value).assertEqual(32767);
     });
   });
   

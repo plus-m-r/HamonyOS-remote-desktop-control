@@ -151,8 +151,6 @@ export class Capture {
     capWidthByteSize: number,
     bufferSize: number
   ): void {
-    console.log(`[步骤8-灰度转换] 开始转换, tile尺寸: ${tileWidth}x${tileHeight}, 源数据大小: ${src.length}字节, 预期大小: ${tileWidth * tileHeight}字节`);
-    
     let srcPos = 0;
     let underflowCount = 0;
     let processedPixels = 0;
@@ -188,8 +186,6 @@ export class Capture {
       }
       destPos += capWidthByteSize - tileWidth * 4;
     }
-    
-    console.log(`[步骤8-灰度转换] 转换完成, 处理像素: ${processedPixels}, 数据不足像素: ${underflowCount}`);
   }
 
   /**

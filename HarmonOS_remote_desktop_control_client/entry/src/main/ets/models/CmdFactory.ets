@@ -157,15 +157,15 @@ export class CmdUtils {
    */
   static createCaptureConfigCmd(
     deviceCode: string,
-    captureFrequency: number,
-    quality: number,
-    maxFps: number
+    captureTick: number = 30,
+    quantization: number = 6,
+    captureColors: number = 0
   ): ConcreteCmd {
     const data = new CmdData();
     data.deviceCode = deviceCode;
-    data.captureFrequency = captureFrequency;
-    data.quality = quality;
-    data.maxFps = maxFps;
+    data.captureFrequency = captureTick;
+    data.quality = quantization;
+    data.maxFps = captureColors;
     return new ConcreteCmd(CmdType.CaptureConfig, data);
   }
 
@@ -175,12 +175,18 @@ export class CmdUtils {
   static createCompressorConfigCmd(
     deviceCode: string,
     compressionMethod: CompressionMethod,
-    compressionLevel: number
+    compressionLevel: number = 0,
+    useCache: boolean = true,
+    cacheMaxSize: number = 1000,
+    cachePurgeSize: number = 500
   ): ConcreteCmd {
     const data = new CmdData();
     data.deviceCode = deviceCode;
     data.compressionMethod = compressionMethod;
     data.compressionLevel = compressionLevel;
+    data.useCache = useCache;
+    data.cacheMaxSize = cacheMaxSize;
+    data.cachePurgeSize = cachePurgeSize;
     return new ConcreteCmd(CmdType.CompressorConfig, data);
   }
 

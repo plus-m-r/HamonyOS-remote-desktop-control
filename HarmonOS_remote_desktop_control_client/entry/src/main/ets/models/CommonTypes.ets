@@ -6,7 +6,7 @@
  */
 
 import {
-  ImageProcessResult,
+  FrameProcessResult,
   ProtocolParseResult
 } from '../repository/IWorkerRepository';
 
@@ -69,10 +69,10 @@ export interface WorkerTaskItem<T> {
 }
 
 /**
- * 图像处理Worker任务项
+ * 帧处理Worker任务项
  */
 export interface ImageProcessTaskItem {
-  resolve: (value: ImageProcessResult) => void;
+  resolve: (value: FrameProcessResult) => void;
   reject: (reason?: Error) => void;
 }
 
@@ -88,17 +88,17 @@ export interface ProtocolParseTaskItem {
  * Worker消息
  */
 export interface WorkerMessage {
-  type: 'imageResult' | 'protocolResult' | 'error';
+  type: 'frameResult' | 'protocolResult' | 'error';
   taskId: number;
   data?: Object;
   error?: string;
 }
 
 /**
- * 图像处理任务消息
+ * 帧处理任务消息
  */
 export interface ImageTaskMessage {
-  type: 'processImage';
+  type: 'processFrame';
   taskId: number;
   task: Object;
 }
