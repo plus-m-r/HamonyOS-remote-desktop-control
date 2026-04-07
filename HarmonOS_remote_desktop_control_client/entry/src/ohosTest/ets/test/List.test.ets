@@ -1,5 +1,4 @@
 import UtilsUnitTest from './utils/Utils.test';
-import CaptureWorkerTest from './utils/CaptureWorker.test';
 import ModelsUnitTest from './models/Models.test';
 import ConfigCenterTest from './config/ConfigCenter.test';
 import ModelsExtendedTest from './models/ModelsExtended.test';
@@ -8,7 +7,6 @@ import AppStateManagerTest from './state/AppStateManager.test';
 
 export default function testsuite() {
   UtilsUnitTest();
-  CaptureWorkerTest();
   ModelsUnitTest();
   ConfigCenterTest();
   ModelsExtendedTest();

@@ -2,7 +2,6 @@ import taskpool from '@ohos.taskpool';
 
 /**
  * TaskPool工具类，用于处理并发任务
- * 注意：实际的捕获任务处理已在 CaptureWorker 中实现
  */
 export class TaskPoolUtil {
   /**
