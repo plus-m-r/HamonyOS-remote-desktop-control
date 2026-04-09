@@ -3,7 +3,7 @@
 
 import { ControlViewModel, ControlPageState, UploadableFile } from '../viewmodel/ControlViewModel';
 import { ServiceProvider } from '../di/ServiceProvider';
-import { promptAction, router } from '@kit.ArkUI';
+import { promptAction, router, ImageFit } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { image } from '@kit.ImageKit';
 
@@ -224,6 +224,14 @@ struct Control {
             this.viewModel.setXComponent(xComponent);
           }
         })
+
+        // 添加 Image 组件显示屏幕图像
+        if (this.state.screenImage) {
+          Image(this.state.screenImage)
+            .width('100%')
+            .height('100%')
+            .objectFit(ImageFit.Contain)
+        }
 
         // 拖拽提示
         if (this.state.isDragging) {

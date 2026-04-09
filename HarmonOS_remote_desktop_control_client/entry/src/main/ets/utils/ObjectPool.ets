@@ -66,8 +66,15 @@ export class BufferPool {
     let pool = this.pools.get(alignedSize);
     if (!pool) {
       pool = new ObjectPool<Uint8Array>(
-        () => new Uint8Array(alignedSize),
-        (buf) => buf.fill(0),
+        () => {
+          const buffer = new Uint8Array(alignedSize);
+          // 初始化所有像素为不透明（A=FF）
+          for (let i = 0; i < alignedSize; i += 4) {
+            buffer[i] = 0xFF; // A通道设置为不透明
+          }
+          return buffer;
+        },
+        (buf) => {}, // 移除填充操作，保持之前的内容
         this.maxPoolSize
       );
       this.pools.set(alignedSize, pool);

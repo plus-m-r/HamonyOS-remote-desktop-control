@@ -3,6 +3,7 @@
  * 共享的命令数据结构定义
  */
 import { CmdType, ClipboardData } from './CmdProtocol';
+import { CompressionConfig } from '../network/CmdCodec';
 
 export class CmdData {
   deviceCode: string = '';
@@ -40,6 +41,7 @@ export class CmdData {
   osName: string = 'HarmonyOS'; // 操作系统名称
   type: CmdType = CmdType.ReqPing;
   id: string = '';
+  compressionConfig?: CompressionConfig;
 
   static fromObject(obj: Record<string, Object>): CmdData {
     const data = new CmdData();
@@ -78,6 +80,7 @@ export class CmdData {
     if (obj['osName'] !== undefined) data.osName = String(obj['osName']);
     if (obj['type'] !== undefined) data.type = obj['type'] as CmdType;
     if (obj['id'] !== undefined) data.id = String(obj['id']);
+    if (obj['compressionConfig'] !== undefined) data.compressionConfig = obj['compressionConfig'] as CompressionConfig;
     return data;
   }
 }

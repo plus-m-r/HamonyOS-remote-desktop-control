@@ -137,7 +137,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   production: {
     server: {
-      host: '10.34.36.191',
+      host: '172.18.254.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'

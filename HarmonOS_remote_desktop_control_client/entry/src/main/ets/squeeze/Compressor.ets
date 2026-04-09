@@ -89,18 +89,14 @@ export class Compressor {
           const value = unzipped.readShort();
 
           if (value >= 0 && value < 256) {
-            dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
-          } else if (value === 256) {
-            const cacheId = unzipped.readInt();
-            dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cache.get(cacheId));
-          } else if (value < 0) {
-            // 只有 value < 0 才是 uncached tile
-            this.processUncached(cache, unzipped, xywhArray[tidx], dirty, tidx, value);
-          } else {
-            // 不应该出现的情况：value > 256 但不是 256，也不是负数
-            hilog.error(DOMAIN, TAG, 'decompress: WARNING - invalid tile value! value=%{public}d, tidx=%{public}d, skipping', value, tidx);
-            // 为了避免读指针完全错位，这里我们只能继续，让后续逻辑自行恢复
-          }
+              dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
+            } else if (value === 256) {
+              const cacheId = unzipped.readInt();
+              dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cache.get(cacheId));
+            } else {
+              // 其他情况：multi-level (not cached)
+              this.processUncached(cache, unzipped, xywhArray[tidx], dirty, tidx, value);
+            }
         }
         idx += markerCount;
       } else {
@@ -111,26 +107,53 @@ export class Compressor {
       }
     }
 
-    return new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty);
+    const capture = new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty);
+    
+    // 保存所有瓦片数据，用于与Java客户端数据对比
+    capture.saveAllTilesData().catch((error: Object) => {
+      hilog.error(DOMAIN, TAG, 'Failed to save tiles data: %{public}s', error);
+    });
+    
+    return capture;
   }
 
   private processUncached(cache: TileCache, unzipped: MemByteBuffer, xywh: XYWH, dirty: (CaptureTile | null)[], tidx: number, value: number): void {
     const dataLength = -value;
-    const availableBytes = unzipped.size() - unzipped.getReadOffset();
     
-    hilog.error(DOMAIN, TAG, 'processUncached: value=%{public}d, dataLength=%{public}d, available=%{public}d, unzipped.size=%{public}d, readOffset=%{public}d', value, dataLength, availableBytes, unzipped.size(), unzipped.getReadOffset());
-    
-    // 与 Java 客户端一致：不管数据够不够，尽力读取
-    const tdata = new Uint8Array(dataLength);
-    
-    // 使用新的尽力读取方法
-    const bytes = unzipped.readBytesBestEffort(dataLength);
-    if (bytes.length > 0) {
-      tdata.set(bytes, 0);
+    // 与 Java 客户端一致：确保读取完整数据
+    if (dataLength <= 0) {
+      // 数据长度无效，跳过处理
+      hilog.error(DOMAIN, TAG, 'processUncached: invalid dataLength: %{public}d', dataLength);
+      return;
     }
-
+    
+    // 确保读取完整数据，与 Java 客户端一致
+    const tdata = new Uint8Array(dataLength);
+    let totalRead = 0;
+    
+    // 尝试读取完整数据
+    while (totalRead < dataLength) {
+      const remaining = dataLength - totalRead;
+      const bytes = unzipped.readBytesBestEffort(remaining);
+      
+      if (bytes.length === 0) {
+        // 没有更多数据可读，跳出循环
+        break;
+      }
+      
+      tdata.set(bytes, totalRead);
+      totalRead += bytes.length;
+    }
+    
+    // 与 Java 客户端一致：如果数据不足，不填充零，使用实际读取的数据
+    // 注意：Java 客户端使用 DataInputStream.read() 会阻塞直到读取到足够数据
+    // 但在我们的实现中，数据已经在缓冲区中，所以如果数据不足，说明缓冲区数据不完整
+    
+    // 只处理实际读取的数据
+    const actualData = tdata.subarray(0, totalRead);
+    
     const out = new MemByteBuffer();
-    this.rle.runLengthDecode(out, MemByteBuffer.fromArray(tdata));
+    this.rle.runLengthDecode(out, MemByteBuffer.fromArray(actualData));
 
     dirty[tidx] = CaptureTile.fromCapture(xywh, out);
     cache.add(dirty[tidx]!);

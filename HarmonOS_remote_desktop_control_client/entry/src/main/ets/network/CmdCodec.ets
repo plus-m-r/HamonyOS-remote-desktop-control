@@ -8,6 +8,16 @@ import { CmdType, OpenStatus, CaptureStatus, CompressionMethod, MouseAction, Cli
 import { util } from '@kit.ArkTS';
 
 /**
+ * 压缩配置接口
+ */
+export interface CompressionConfig {
+  method: number;
+  useCache: boolean;
+  cacheMaxSize: number;
+  cachePurgeSize: number;
+}
+
+/**
  * 命令编解码器
  */
 export class CmdCodec {
@@ -1257,13 +1267,33 @@ export class CmdCodec {
       const hasCompressionConfig = view.getUint8(offset) === 1;
       offset += 1;
 
-      // 如果有压缩配置，跳过它 (10字节)
+      // 解析压缩配置（如果有）
+      let compressionConfig: CompressionConfig | undefined = undefined;
       if (hasCompressionConfig) {
         if (dataBuffer.byteLength < offset + 10) {
           console.error('CmdCodec: Capture compression config incomplete');
           return undefined;
         }
-        offset += 10;
+        
+        // 解析压缩配置（与 CmdCompressorConf 一致）
+        const method = view.getUint8(offset);
+        offset += 1;
+        const useCache = view.getUint8(offset) === 1;
+        offset += 1;
+        const cacheMaxSize = view.getInt32(offset, false);
+        offset += 4;
+        const cachePurgeSize = view.getInt32(offset, false);
+        offset += 4;
+        
+        const config: CompressionConfig = {
+          method,
+          useCache,
+          cacheMaxSize,
+          cachePurgeSize
+        };
+        compressionConfig = config;
+        
+        console.log(`CmdCodec: Decoded Capture compression config - method: ${method}, useCache: ${useCache}, cacheMaxSize: ${cacheMaxSize}, cachePurgeSize: ${cachePurgeSize}`);
       }
 
       // 读取 payload 长度
@@ -1283,10 +1313,10 @@ export class CmdCodec {
       // 读取 payload (image data)
       const imageData = dataBuffer.slice(offset, offset + payloadLength);
 
-      console.log(`CmdCodec: Decoded Capture command - id: ${id}, compressionMethod: ${compressionMethodOrdinal}, payloadSize: ${payloadLength}`);
+      console.log(`CmdCodec: Decoded Capture command - id: ${id}, compressionMethod: ${compressionMethodOrdinal}, payloadSize: ${payloadLength}, hasConfig: ${hasCompressionConfig}`);
 
       // 创建命令对象
-      return CmdUtils.createCaptureDataCmd(imageData, 0, 0, compressionMethodOrdinal);
+      return CmdUtils.createCaptureDataCmd(imageData, 0, 0, compressionMethodOrdinal, compressionConfig);
     } catch (error) {
       console.error('CmdCodec: Failed to decode Capture command', error);
       return undefined;

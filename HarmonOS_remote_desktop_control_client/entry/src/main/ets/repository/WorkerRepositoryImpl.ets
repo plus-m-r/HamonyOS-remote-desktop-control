@@ -11,7 +11,9 @@
 import {
   IWorkerRepository,
   ProtocolParseTask,
-  ProtocolParseResult
+  ProtocolParseResult,
+  FrameProcessTask,
+  FrameProcessResult
 } from './IWorkerRepository';
 import worker from '@ohos.worker';
 import {

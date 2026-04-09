@@ -28,6 +28,7 @@ import {
   CaptureStatus
 } from '../../models/CmdProtocol';
 import { IConnectionManager } from '../connection/IConnectionManager';
+import { CompressionConfig } from '../../network/CmdCodec';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../interfaces/IHeartbeatManager';
 import { IWorkerRepository, FrameProcessTask, FrameProcessResult } from '../../repository/IWorkerRepository';
@@ -41,6 +42,10 @@ import { Compressor, CompressionMethod } from '../../squeeze/Compressor';
 import { TileCache, NullTileCache, RegularTileCache } from '../../squeeze/TileCache';
 import { Capture } from '../../squeeze/Capture';
 import hilog from '@ohos.hilog';
+import fs from '@ohos.file.fs';
+import { util } from '@kit.ArkTS';
+import common from '@ohos.app.ability.common';
+import { GlobalContext } from '../../utils/GlobalContext';
 
 const DOMAIN: number = 0xFF00;
 const TAG: string = 'RemoteControlService';
@@ -51,6 +56,19 @@ const TAG: string = 'RemoteControlService';
 interface VideoStreamConfig {
   enabled: boolean;
   compressionMethod: number;
+}
+
+/**
+ * Capture 信息
+ */
+interface CaptureInfo {
+  id: number;
+  reset: boolean;
+  width: number;
+  height: number;
+  tileWidth: number;
+  tileHeight: number;
+  dirtyTilesCount: number;
 }
 
 export class RemoteControlService implements IRemoteControlService {
@@ -480,15 +498,39 @@ export class RemoteControlService implements IRemoteControlService {
     const data = cmd.getData();
     const imageData = data.imageData;
     const compressionMethod = data.compressionMethod || 3; // 默认 ZSTD
+    const compressionConfig: CompressionConfig | undefined = data.compressionConfig;
 
     if (!imageData || (typeof imageData === 'string' && imageData.length === 0)) {
       hilog.error(DOMAIN, TAG, 'CaptureData command has no image data');
       return;
     }
 
-    hilog.info(DOMAIN, TAG, 'CmdCapture received - imageData size: %{public}d, compressionMethod: %{public}d',
+    // 处理压缩配置（效仿 Java 端 DeCompressorEngine）
+    if (compressionConfig) {
+      const method = compressionConfig.method || 3;
+      const useCache = compressionConfig.useCache !== false;
+      const cacheMaxSize = compressionConfig.cacheMaxSize || 1000;
+      const cachePurgeSize = compressionConfig.cachePurgeSize || 500;
+      
+      // 根据配置创建对应的 TileCache
+      if (useCache) {
+        const maxSize = Number(cacheMaxSize);
+        const purgeSize = Number(cachePurgeSize);
+        this.tileCache = new RegularTileCache(maxSize, purgeSize);
+        hilog.info(DOMAIN, TAG, 'Using RegularTileCache - maxSize: %{public}d, purgeSize: %{public}d', maxSize, purgeSize);
+      } else {
+        this.tileCache = new NullTileCache();
+        hilog.info(DOMAIN, TAG, 'Using NullTileCache (no cache)');
+      }
+      
+      hilog.info(DOMAIN, TAG, 'Capture compression config applied - method: %{public}d, useCache: %{public}s', 
+        method, useCache ? 'true' : 'false');
+    }
+
+    hilog.info(DOMAIN, TAG, 'CmdCapture received - imageData size: %{public}d, compressionMethod: %{public}d, hasConfig: %{public}s',
       typeof imageData === 'string' ? imageData.length : (imageData as ArrayBuffer).byteLength,
-      compressionMethod);
+      compressionMethod,
+      compressionConfig ? 'true' : 'false');
 
     // 将 imageData 转换为 ArrayBuffer (如果是 string 格式)
     let payloadBuffer: ArrayBuffer;
@@ -572,17 +614,17 @@ export class RemoteControlService implements IRemoteControlService {
    * @param data 压缩的视频数据
    * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
    */
+  private isFirstFrame: boolean = true;
+  private saveDataCounter: number = 0;
+
   private async onRawVideoData(data: ArrayBuffer, compressionMethod: number = 3): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
       data.byteLength, compressionMethod);
 
     try {
+      // 处理所有帧
       const prevParams = this.captureProcessor.getPrevBufferParams();
-
-      // 1. 将 payload 转换为 MemByteBuffer
       const zippedData = MemByteBuffer.fromArray(new Uint8Array(data));
-
-      // 2. 映射压缩方法
       let squeezeMethod: CompressionMethod = CompressionMethod.NONE;
       switch (compressionMethod) {
         case 1:
@@ -595,31 +637,74 @@ export class RemoteControlService implements IRemoteControlService {
           squeezeMethod = CompressionMethod.ZSTD;
           break;
       }
-
-      // 3. 获取压缩器并解压
       const compressor = Compressor.get(squeezeMethod);
       const capture: Capture = await compressor.decompress(this.tileCache, zippedData);
-
-      // 决定是否复用 prevBuffer
       const width = capture.width;
       const height = capture.height;
       const bufferSize = width * height * 4;
       const reset = capture.reset;
-
       let imageBuffer: Uint8Array;
-
+      
       if (!reset && prevParams.buffer !== null && prevParams.width === width && prevParams.height === height) {
-        // 增量帧且尺寸匹配：复用 prevBuffer
         imageBuffer = new Uint8Array(prevParams.buffer);
       } else {
-        // 完整帧或尺寸不匹配：创建新缓冲区
         imageBuffer = new Uint8Array(bufferSize);
+        // 初始化缓冲区为不透明的黑色背景
+        for (let i = 0; i < bufferSize; i += 4) {
+          imageBuffer[i] = 0xFF; // A 通道：完全不透明
+          imageBuffer[i + 1] = 0x00; // R 通道：黑色
+          imageBuffer[i + 2] = 0x00; // G 通道：黑色
+          imageBuffer[i + 3] = 0x00; // B 通道：黑色
+        }
+      }
+      
+      // 保存第一帧的所有步骤数据
+      if (this.isFirstFrame) {
+        const timestamp = Date.now();
+
+        // 1. 保存原始压缩数据（步骤1）
+        await this.saveArrayBufferToFile(`data/step1_raw_${timestamp}.bin`, data);
+        hilog.info(DOMAIN, TAG, 'Saved step1: raw compressed data');
+
+        // 5. 保存解压后的 Capture 信息（步骤2）
+        const captureInfo: CaptureInfo = {
+          id: capture.id,
+          reset: capture.reset,
+          width: capture.width,
+          height: capture.height,
+          tileWidth: capture.tileWidth,
+          tileHeight: capture.tileHeight,
+          dirtyTilesCount: capture.dirtyTiles.filter((t) => t !== null).length
+        };
+        await this.saveJsonToFile(`data/step2_capture_info_${this.saveDataCounter}_${timestamp}.json`, captureInfo);
+        this.saveDataCounter++;
+        hilog.info(DOMAIN, TAG, 'Saved step2: capture info');
+        hilog.info(DOMAIN, TAG, 'saveDataCounter: %{public}d', this.saveDataCounter);
+
+        // 6. 保存第一个瓦片的原始数据（如果有）
+        const firstDirtyTile = capture.dirtyTiles.find(t => t !== null);
+        if (firstDirtyTile && firstDirtyTile.capture) {
+          await this.saveArrayBufferToFile(`data/step3_first_tile_data_${timestamp}.bin`, firstDirtyTile.capture.getInternal().buffer as ArrayBuffer);
+          hilog.info(DOMAIN, TAG, 'Saved step3: first tile raw data');
+        }
+
+        // 8. 保存绘制前的缓冲区（步骤4）
+        await this.saveArrayBufferToFile(`data/step4_before_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
+        hilog.info(DOMAIN, TAG, 'Saved step4: buffer before draw');
       }
 
-      // 将 dirty tiles 绘制到缓冲区
+      // 9. 将 dirty tiles 绘制到缓冲区
       capture.drawToBuffer(imageBuffer);
 
-      // 通知缓存处理完成
+      // 保存第一帧的绘制后数据
+      if (this.isFirstFrame) {
+        const timestamp = Date.now();
+        // 10. 保存绘制后的缓冲区（步骤5）
+        await this.saveArrayBufferToFile(`data/step5_after_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
+        hilog.info(DOMAIN, TAG, 'Saved step5: buffer after draw');
+      }
+
+      // 11. 通知缓存处理完成
       this.tileCache.onCaptureProcessed();
 
       const frameInfo: FrameInfo = {
@@ -629,6 +714,17 @@ export class RemoteControlService implements IRemoteControlService {
         height: height
       };
       const frameResult: CaptureFrameProcessResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
+
+      // 保存第一帧的最终处理数据
+      if (this.isFirstFrame) {
+        const timestamp = Date.now();
+        // 12. 保存处理后的最终图像数据（步骤6）
+        await this.saveArrayBufferToFile(`data/step6_final_image_${timestamp}.raw`, frameResult.buffer.buffer as ArrayBuffer);
+        hilog.info(DOMAIN, TAG, 'Saved step6: final processed image');
+        
+        // 标记第一帧已处理
+        this.isFirstFrame = false;
+      }
 
       if (this.screenCallback) {
         const bufferData: ArrayBuffer = frameResult.buffer.buffer as ArrayBuffer;
@@ -646,6 +742,68 @@ export class RemoteControlService implements IRemoteControlService {
       if (error instanceof Error && error.stack) {
         hilog.error(DOMAIN, TAG, 'Error stack: %{public}s', error.stack);
       }
+    }
+  }
+
+  /**
+   * 保存 ArrayBuffer 到文件
+   */
+  private async saveArrayBufferToFile(filePath: string, buffer: ArrayBuffer): Promise<void> {
+    try {
+      // 使用 HarmonyOS 的文件 API 保存文件
+      const context: common.Context = GlobalContext.getContext().getObject("context") as common.Context;
+      const filesDir: string = context.filesDir;
+      const fullPath: string = filesDir + '/' + filePath;
+      
+      // 确保目录存在
+      const dirPath: string = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      try {
+        fs.mkdirSync(dirPath, true);
+      } catch (e) {
+        // 目录可能已存在，忽略错误
+      }
+      
+      // 写入文件
+      const file = await fs.openSync(fullPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
+      await fs.writeSync(file.fd, buffer);
+      await fs.closeSync(file.fd);
+      
+      hilog.info(DOMAIN, TAG, 'Saved ArrayBuffer to file: %{public}s, size: %{public}d', fullPath, buffer.byteLength);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to save ArrayBuffer to file: %{public}s', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 保存 JSON 到文件
+   */
+  private async saveJsonToFile(filePath: string, data: object): Promise<void> {
+    try {
+      // 使用 HarmonyOS 的文件 API 保存文件
+      const context: common.Context = GlobalContext.getContext().getObject("context") as common.Context;
+      const filesDir: string = context.filesDir;
+      const fullPath: string = filesDir + '/' + filePath;
+      
+      // 确保目录存在
+      const dirPath: string = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      try {
+        fs.mkdirSync(dirPath, true);
+      } catch (e) {
+        // 目录可能已存在，忽略错误
+      }
+      
+      // 写入文件
+      const jsonString: string = JSON.stringify(data, null, 2);
+      const encoder: util.TextEncoder = new util.TextEncoder();
+      const jsonBuffer: Uint8Array = encoder.encodeInto(jsonString);
+      
+      const file = await fs.openSync(fullPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
+      await fs.writeSync(file.fd, jsonBuffer.buffer);
+      await fs.closeSync(file.fd);
+      
+      hilog.info(DOMAIN, TAG, 'Saved JSON to file: %{public}s', fullPath);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to save JSON to file: %{public}s', error instanceof Error ? error.message : String(error));
     }
   }
 

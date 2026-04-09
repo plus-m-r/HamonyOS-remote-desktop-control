@@ -5,6 +5,7 @@
 import { ConcreteCmd } from './ConcreteCmd';
 import { CmdData } from './CmdData';
 import { CmdType, MouseAction, OpenStatus, CaptureStatus, CompressionMethod, ClipboardData } from './CmdProtocol';
+import { CompressionConfig } from '../network/CmdCodec';
 
 /**
  * 命令工厂类
@@ -100,13 +101,17 @@ export class CmdUtils {
     imageData: string | ArrayBuffer,
     width: number,
     height: number,
-    compressionMethod: CompressionMethod | number
+    compressionMethod: CompressionMethod | number,
+    compressionConfig?: CompressionConfig
   ): ConcreteCmd {
     const data = new CmdData();
     data.imageData = imageData;
     data.width = width;
     data.height = height;
     data.compressionMethod = compressionMethod as number;
+    if (compressionConfig) {
+      data.compressionConfig = compressionConfig;
+    }
     return new ConcreteCmd(CmdType.Capture, data);
   }
 
