@@ -42,3 +42,6 @@ bin/
 *.log.gz
 out/
 MANIFEST.MF
+
+# Reference code directory
+reference_code/

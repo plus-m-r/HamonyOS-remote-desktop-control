@@ -1,4 +1,5 @@
 import hilog from '@ohos.hilog';
+import { ChecksumUtils } from '../utils/ChecksumUtils';
 
 const DOMAIN: number = 0xFF00;
 const TAG: string = 'MemByteBuffer';
@@ -90,13 +91,14 @@ export class MemByteBuffer {
     }
     const b1 = this.buffer[this.readOffset++] & 0xFF;
     const b2 = this.buffer[this.readOffset++] & 0xFF;
-    let result = (b1 << 8) | b2;
     // 与 Java 的 DataInputStream.readShort() 一致
-    if ((result & 0x8000) !== 0) {
-      result = result - 0x10000;
-    }
-    hilog.error(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, result=%{public}d', b1.toString(16), b2.toString(16), result);
-    return result;
+    // Java 的 readShort() 读取 2 个字节，大端序，返回有符号短整型
+    const result = (b1 << 8) | b2;
+    // 将无符号 16 位整数转换为有符号 16 位整数
+    const signedResult = result > 32767 ? result - 65536 : result;
+    hilog.error(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, unsigned=%{public}d, signed=%{public}d', 
+      b1.toString(16), b2.toString(16), result, signedResult);
+    return signedResult;
   }
 
   readUnsignedShort(): number {
@@ -171,5 +173,42 @@ export class MemByteBuffer {
     for (let i = 0; i < count; i++) {
       this.buffer[this.writeOffset++] = value & 0xFF;
     }
+  }
+
+  /**
+   * 计算当前缓冲区数据的校验和
+   * @returns Adler32校验和
+   */
+  computeChecksum(): number {
+    const data = this.buffer.subarray(0, this.writeOffset);
+    return ChecksumUtils.computeAdler32(data);
+  }
+
+  /**
+   * 验证当前缓冲区数据的校验和
+   * @param expectedChecksum 期望的校验和
+   * @returns 是否验证通过
+   */
+  verifyChecksum(expectedChecksum: number): boolean {
+    const data = this.buffer.subarray(0, this.writeOffset);
+    return ChecksumUtils.verifyChecksum(data, expectedChecksum);
+  }
+
+  /**
+   * 写入校验和到缓冲区
+   */
+  writeChecksum(): void {
+    const checksum = this.computeChecksum();
+    this.writeInt(checksum);
+  }
+
+  /**
+   * 读取并验证校验和
+   * @param expectedChecksum 期望的校验和
+   * @returns 是否验证通过
+   */
+  readAndVerifyChecksum(expectedChecksum: number): boolean {
+    const checksum = this.readInt();
+    return checksum === expectedChecksum;
   }
 }

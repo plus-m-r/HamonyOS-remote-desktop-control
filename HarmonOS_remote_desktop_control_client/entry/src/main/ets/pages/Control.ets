@@ -1,9 +1,8 @@
 // Control.ets - 解耦后的控制页面，通过 ViewModel 管理业务逻辑
 // 遵循 MVVM 架构，页面只负责 UI 渲染和事件转发
-
 import { ControlViewModel, ControlPageState, UploadableFile } from '../viewmodel/ControlViewModel';
 import { ServiceProvider } from '../di/ServiceProvider';
-import { promptAction, router, ImageFit } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { image } from '@kit.ImageKit';
 
@@ -32,12 +31,14 @@ struct Control {
     isToolbarVisible: true,
     lastTouchX: 0,
     lastTouchY: 0,
-    screenImage: null as image.PixelMap | null,
     currentScale: 1.0,
     lastScale: 1.0,
     isLongPress: false,
     errorMessage: ''
   };
+
+  // 用于显示远程屏幕画面
+  @State private screenPixelMap: image.PixelMap | null = null;
 
   constructor() {
     super();
@@ -103,6 +104,15 @@ struct Control {
       } catch (error) {
         hilog.error(DOMAIN, TAG, '获取路由参数失败: %{public}s', JSON.stringify(error));
       }
+
+      // 设置屏幕像素数据回调
+      this.viewModel.setScreenPixelMapCallback((pixelMap: image.PixelMap) => {
+        this.screenPixelMap = pixelMap;  // 触发 UI 刷新
+      });
+
+      // 设置 UIContext 用于主线程渲染
+      const uiContext = this.getUIContext();
+      this.viewModel.setUIContext(uiContext);
 
       this.viewModel.initialize(deviceId, password);
     } catch (error) {
@@ -210,30 +220,22 @@ struct Control {
   buildRemoteScreen() {
     Column() {
       Stack() {
-        // 使用 XComponent 显示远程屏幕
-        XComponent({
-          id: 'remoteScreen',
-          type: XComponentType.SURFACE,
-          libraryname: ''
-        })
-        .width('100%')
-        .height('100%')
-        .onLoad((xComponent) => {
-          hilog.info(DOMAIN, TAG, 'XComponent loaded');
-          if (xComponent) {
-            this.viewModel.setXComponent(xComponent);
-          }
-        })
-
-        // 添加 Image 组件显示屏幕图像
-        if (this.state.screenImage) {
-          Image(this.state.screenImage)
+        // 使用 Image 组件显示远程画面
+        if (this.screenPixelMap) {
+          Image(this.screenPixelMap)
             .width('100%')
             .height('100%')
             .objectFit(ImageFit.Contain)
+        } else {
+          // 占位背景
+          Text('等待画面...')
+            .width('100%')
+            .height('100%')
+            .textAlign(TextAlign.Center)
+            .backgroundColor('#808080')
         }
 
-        // 拖拽提示
+        // 拖拽提示层（可选）
         if (this.state.isDragging) {
           Stack() {
             Text('拖放文件到这里上传')
@@ -248,7 +250,8 @@ struct Control {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#000000')
+      .backgroundColor('#808080')
+      // 手势、拖拽事件等保持不变
       .onDragEnter(() => this.showDragHint())
       .onDragLeave(() => this.hideDragHint())
       .onDrop((event?: DragEvent, extraParams?: string) => {
@@ -298,9 +301,6 @@ struct Control {
         .onClick(() => {
           this.routerPushUrl('pages/Settings');
         })
-
-      Button('最小化工具栏')
-        .onClick(() => this.toggleToolbar())
     }
     .width('100%')
     .padding(12)
@@ -316,9 +316,13 @@ struct Control {
   build() {
     Column() {
       this.buildRemoteScreen()
+      // 条件渲染工具栏
+      if (this.state.isToolbarVisible) {
+        this.buildControlToolbar()
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#000')
+    .backgroundColor('#808080')
   }
 }

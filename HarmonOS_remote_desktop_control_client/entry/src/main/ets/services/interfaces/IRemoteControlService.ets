@@ -3,6 +3,7 @@
 
 import { ConnectionState, RemoteControlEvent, DeviceValidationResult } from '../../models/DeviceInfo';
 import { ClientInfoCallback, ConnectionCallback, ClipboardCallback } from '../../models/CmdProtocol';
+import { UIContext } from '@kit.ArkUI';
 
 /**
  * 远程控制服务配置
@@ -80,12 +81,6 @@ export interface IRemoteControlService {
    * 设置屏幕数据回调
    */
   setScreenCallback(callback: ScreenCallback): void;
-
-  /**
-   * 设置 XComponent 用于视频渲染
-   * @param xComponent XComponent 组件实例
-   */
-  setXComponent(xComponent: Object): void;
 
   // ========== 输入控制 ==========
 

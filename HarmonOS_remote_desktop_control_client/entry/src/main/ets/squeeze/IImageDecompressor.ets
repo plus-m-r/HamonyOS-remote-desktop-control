@@ -16,8 +16,6 @@ import { Capture } from './Capture';
 export interface DecompressorConfig {
   /** 压缩方法 */
   compressionMethod: CompressionMethod;
-  /** 是否启用瓦片缓存 */
-  useTileCache: boolean;
 }
 
 /**

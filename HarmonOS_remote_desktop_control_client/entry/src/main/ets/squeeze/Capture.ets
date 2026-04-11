@@ -69,23 +69,7 @@ export class Capture {
   createImageBuffer(prevBuffer: Uint8Array | null, prevWidth: number, prevHeight: number): Uint8Array {
     const capWidth = this.width;
     const capHeight = this.height;
-    const startTime = Date.now();
-
-    logManager.consoleLog(`[图像组装] 开始, 尺寸: ${capWidth}x${capHeight}, tiles: ${this.dirtyTiles.length}`);
-
-    // 安全检查：确保宽度和高度是合理的
-    if (capWidth <= 0 || capHeight <= 0 || capWidth > 10000 || capHeight > 10000) {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Invalid dimensions: %{public}dx%{public}d', capWidth, capHeight);
-      return new Uint8Array(0);
-    }
-
     const bufferSize = capWidth * capHeight * 4;
-
-    // 安全检查：确保bufferSize不会溢出
-    if (bufferSize > 100000000) { // 100MB限制
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Buffer size too large: %{public}d', bufferSize);
-      return new Uint8Array(0);
-    }
 
     let buffer: Uint8Array;
     const bufferPool = BufferPool.getInstance();
@@ -93,22 +77,18 @@ export class Capture {
     // 优先使用对象池，其次复用前一帧缓冲区
     if (prevBuffer !== null && capWidth === prevWidth && capHeight === prevHeight && prevBuffer.length === bufferSize) {
       buffer = prevBuffer;
-      logManager.consoleLog('[图像组装] 复用前一帧缓冲区');
       
       // 如果是重置操作，清空缓冲区
       if (this.reset) {
         buffer.fill(0);
-        logManager.consoleLog('[图像组装] 重置操作，清空缓冲区');
       }
     } else {
       // 使用对象池获取缓冲区
       buffer = bufferPool.acquireBuffer(bufferSize);
-      logManager.consoleLog(`[图像组装] 从对象池获取缓冲区, 大小: ${bufferSize}`);
       
       // 如果是重置操作，确保缓冲区为空
       if (this.reset) {
         buffer.fill(0);
-        logManager.consoleLog('[图像组装] 重置操作，清空缓冲区');
       }
     }
 
@@ -128,40 +108,17 @@ export class Capture {
     const capWidthByteSize = capWidth * 4;
     const bufferSize = capWidth * capHeight * 4;
 
-    let processedTiles = 0;
-    let skippedTiles = 0;
-    const startTime = Date.now();
-
-    // 保存渲染前图像
-    const beforeBuffer = new Uint8Array(buffer);
-
     // 检查是否为灰度图像
     const isGray = this.dirtyTiles.some(tile =>
-      tile !== null && tile !== undefined && tile.capture !== null &&
+      tile !== null && tile.capture !== null &&
       tile.capture.size() === tile.width * tile.height
     );
-
-    // 计算瓦片网格大小
-    const tilesPerRow = Math.ceil(capWidth / this.tileWidth);
-    const tilesPerCol = Math.ceil(capHeight / this.tileHeight);
 
     for (let i = 0; i < this.dirtyTiles.length; i++) {
       const tile = this.dirtyTiles[i];
       
-      if (tile === null || tile === undefined || tile.capture === null) {
-        // 非脏瓦片：保持之前的内容（已经在缓冲区中）
-        // 从索引计算瓦片位置，确保缓冲区初始化正确
-        const tileRow = Math.floor(i / tilesPerRow);
-        const tileCol = i % tilesPerRow;
-        const tileX = tileCol * this.tileWidth;
-        const tileY = tileRow * this.tileHeight;
-        
-        // 验证瓦片位置是否有效
-        if (tileX < 0 || tileY < 0 || tileX >= capWidth || tileY >= capHeight) {
-          logManager.warn(PERF_DOMAIN, PERF_TAG, 'Non-dirty tile position out of bounds: (%{public}d, %{public}d)', tileX, tileY);
-        }
-        
-        skippedTiles++;
+      if (tile === null || tile.capture === null) {
+        // 非脏瓦片：保持之前的内容
         continue;
       }
 
@@ -169,25 +126,7 @@ export class Capture {
       const tileWidth = tile.width;
       const tileHeight = tile.height;
 
-      // 安全检查：确保tile位置在有效范围内
-      if (tile.x < 0 || tile.y < 0 || tile.x >= capWidth || tile.y >= capHeight) {
-        logManager.error(PERF_DOMAIN, PERF_TAG, 'Tile position out of bounds: (%{public}d, %{public}d)', tile.x, tile.y);
-        continue;
-      }
-
       let destPos = tile.y * capWidthByteSize + tile.x * 4;
-
-      // 安全检查：确保destPos在有效范围内
-      if (destPos < 0 || destPos >= bufferSize) {
-        logManager.error(PERF_DOMAIN, PERF_TAG, 'Destination position out of bounds: %{public}d', destPos);
-        continue;
-      }
-
-      // 安全检查：确保数据长度在合理范围内
-      if (src.length === 0) {
-        logManager.warn(PERF_DOMAIN, PERF_TAG, 'Empty data for tile');
-        continue;
-      }
 
       // 根据数据大小判断处理方式
       if (isGray) {
@@ -195,24 +134,11 @@ export class Capture {
       } else {
         this.processArgbData(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize, bufferSize);
       }
-      processedTiles++;
     }
-
-    const renderTime = Date.now() - startTime;
-    logManager.consoleLog(`[drawToBuffer] 完成, tiles: ${processedTiles}/${skippedTiles}, 时间: ${renderTime}ms`);
-    // 保存渲染前后图像
-    this.saveRenderedImages(beforeBuffer, buffer).catch((error: Error) => {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Failed to save rendered images: %{public}s', error);
-    });
-
-    // 保存渲染统计信息
-    this.saveRenderStats(processedTiles, skippedTiles, renderTime).catch((error: Error) => {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Failed to save render stats: %{public}s', error);
-    });
   }
 
   /**
-   * 处理8位灰度数据，转换为32位ARGB格式
+   * 处理8位灰度数据，转换为32位RGBA格式
    * 与Java客户端一致：保持灰度值，A通道设为255（不透明）
    */
   private processGrayData(
@@ -228,24 +154,14 @@ export class Capture {
     
     for (let y = 0; y < tileHeight; y++) {
       for (let x = 0; x < tileWidth; x++) {
-        // 确保不会写入超出buffer范围的数据
-        if (destPos + 3 >= bufferSize) {
-          console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos}`);
-          return;
-        }
-        
-        // 确保不会读取超出src范围的数据
-        if (srcPos >= src.length) {
-          // 数据不足时，保持现有数据不变
-          // 与Java客户端一致：不填充默认值
-        } else {
-          // 将8位灰度值转换为32位ARGB格式
+        if (srcPos < src.length) {
+          // 将8位灰度值转换为32位RGBA格式
           // 灰度值同时设置到R、G、B通道，A通道设为255（不透明）
           const grayValue = src[srcPos++];
-          buffer[destPos] = 0xff;      // A (与Java客户端一致：设置为不透明)
-          buffer[destPos + 1] = grayValue; // R
-          buffer[destPos + 2] = grayValue; // G
-          buffer[destPos + 3] = grayValue;     // B
+          buffer[destPos] = grayValue;     // R
+          buffer[destPos + 1] = grayValue; // G
+          buffer[destPos + 2] = grayValue; // B
+          buffer[destPos + 3] = 0xff;      // A (与Java客户端一致：设置为不透明)
         }
         
         destPos += 4;
@@ -255,7 +171,7 @@ export class Capture {
   }
 
   /**
-   * 处理32位ARGB数据 - 与Java客户端一致
+   * 处理32位BGRA数据 - 与Java客户端一致
    */
   private processArgbData(
     buffer: Uint8Array,
@@ -272,13 +188,7 @@ export class Capture {
       const srcPos = y * tileWidthByteSize;
       const rowSize = Math.min(tileWidthByteSize, src.length - srcPos);
       
-      // 确保不会写入超出buffer范围的数据
-      if (destPos + rowSize > bufferSize) {
-        console.error(`Capture: Would write beyond buffer bounds at destPos: ${destPos}`);
-        break;
-      }
-      
-      // 直接批量复制ARGB数据（Alpha, Red, Green, Blue）
+      // 直接批量复制BGRA数据（Blue, Green, Red, Alpha）
       // 与Java客户端一致：保持原始数据，不修改透明度
       buffer.set(src.subarray(srcPos, srcPos + rowSize), destPos);
       destPos += capWidthByteSize;

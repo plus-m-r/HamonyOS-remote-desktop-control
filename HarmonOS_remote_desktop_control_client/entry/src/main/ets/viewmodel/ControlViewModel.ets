@@ -1,6 +1,5 @@
 // ControlViewModel.ets - 控制页面的 ViewModel，解耦业务逻辑与 UI
 // 遵循 MVVM 架构，所有业务逻辑都在这里，便于单元测试
-
 import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
 import { IFileService, UploadFile } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
@@ -8,6 +7,7 @@ import { AppState } from '../state/AppStateManager';
 import { ScreenImage, ConnectionState } from '../models/DeviceInfo';
 import { image } from '@kit.ImageKit';
 import hilog from '@ohos.hilog';
+import { UIContext } from '@kit.ArkUI';
 
 const TAG = 'ControlViewModel';
 const DOMAIN = 0x0000;
@@ -25,7 +25,6 @@ export interface ControlPageState {
   isToolbarVisible: boolean;
   lastTouchX: number;
   lastTouchY: number;
-  screenImage: image.PixelMap | null;
   currentScale: number;
   lastScale: number;
   isLongPress: boolean;
@@ -68,9 +67,11 @@ export type NavigationCallback = (url: string) => void;
 export type BackCallback = () => void;
 
 /**
- * 屏幕图像回调类型
+ * PixelMap 回调类型
  */
-export type ScreenImageCallback = (pixelMap: image.PixelMap | null, width: number, height: number) => void;
+export type ScreenPixelMapCallback = (pixelMap: image.PixelMap) => void;
+
+
 
 /**
  * 控制页面 ViewModel
@@ -80,17 +81,20 @@ export class ControlViewModel {
   private dependencies: ControlViewModelDependencies;
   private state: ControlPageState;
   private stateSubscribers: Array<(state: ControlPageState) => void> = [];
-  
+
   // 回调函数
   private toastCallback: ToastCallback | null = null;
   private navigationCallback: NavigationCallback | null = null;
   private backCallback: BackCallback | null = null;
-  private screenImageCallback: ScreenImageCallback | null = null;
+  private screenPixelMapCallback: ScreenPixelMapCallback | null = null;
   
+  // UI 上下文，用于主线程调度
+  private uiContext: UIContext | null = null;
+
   // 定时器
   private longPressTimer: number | null = null;
   private readonly LONG_PRESS_DURATION = 500; // 长按判定时间（毫秒）
-  
+
   // 缩放限制
   private readonly MIN_SCALE = 0.1;
   private readonly MAX_SCALE = 5.0;
@@ -107,7 +111,6 @@ export class ControlViewModel {
       isToolbarVisible: true,
       lastTouchX: 0,
       lastTouchY: 0,
-      screenImage: null,
       currentScale: 1.0,
       lastScale: 1.0,
       isLongPress: false,
@@ -137,19 +140,21 @@ export class ControlViewModel {
   }
 
   /**
-   * 设置屏幕图像回调
+   * 设置屏幕 PixelMap 回调
    */
-  setScreenImageCallback(callback: ScreenImageCallback): void {
-    this.screenImageCallback = callback;
+  setScreenPixelMapCallback(callback: ScreenPixelMapCallback): void {
+    this.screenPixelMapCallback = callback;
   }
 
   /**
-   * 设置 XComponent 用于视频渲染
+   * 设置 UIContext 用于主线程渲染
    */
-  setXComponent(xComponent: Object): void {
-    hilog.info(DOMAIN, TAG, 'XComponent set in ViewModel');
-    this.dependencies.remoteControlService.setXComponent(xComponent);
+  setUIContext(context: UIContext): void {
+    this.uiContext = context;
+    hilog.info(DOMAIN, TAG, 'UIContext set for main thread rendering');
   }
+
+
 
   /**
    * 显示 Toast
@@ -185,7 +190,7 @@ export class ControlViewModel {
     this.stateSubscribers.push(callback);
     // 立即通知当前状态
     callback(this.copyState(this.state));
-    
+
     // 返回取消订阅函数
     return () => {
       const index = this.stateSubscribers.indexOf(callback);
@@ -223,7 +228,6 @@ export class ControlViewModel {
       isToolbarVisible: state.isToolbarVisible,
       lastTouchX: state.lastTouchX,
       lastTouchY: state.lastTouchY,
-      screenImage: state.screenImage,
       currentScale: state.currentScale,
       lastScale: state.lastScale,
       isLongPress: state.isLongPress,
@@ -245,7 +249,6 @@ export class ControlViewModel {
     if (partialState.isToolbarVisible !== undefined) newState.isToolbarVisible = partialState.isToolbarVisible;
     if (partialState.lastTouchX !== undefined) newState.lastTouchX = partialState.lastTouchX;
     if (partialState.lastTouchY !== undefined) newState.lastTouchY = partialState.lastTouchY;
-    if (partialState.screenImage !== undefined) newState.screenImage = partialState.screenImage;
     if (partialState.currentScale !== undefined) newState.currentScale = partialState.currentScale;
     if (partialState.lastScale !== undefined) newState.lastScale = partialState.lastScale;
     if (partialState.isLongPress !== undefined) newState.isLongPress = partialState.isLongPress;
@@ -261,7 +264,7 @@ export class ControlViewModel {
    */
   initialize(deviceId: string = '', password: string = ''): void {
     hilog.info(DOMAIN, TAG, 'ControlViewModel 初始化 - deviceId: %{public}s', deviceId);
-    
+
     this.updateState({
       remoteDeviceId: deviceId,
       remoteDevicePassword: password
@@ -272,7 +275,7 @@ export class ControlViewModel {
       const newState = connected ? AppState.CONNECTED : AppState.DISCONNECTED;
       hilog.info(DOMAIN, TAG, '连接状态更新: %{public}s', connected ? '已连接' : '未连接');
       this.updateState({ connectionState: newState });
-      
+
       // 如果连接已建立，自动打开远程屏幕
       if (connected && this.state.remoteDeviceId) {
         setTimeout(() => {
@@ -281,12 +284,13 @@ export class ControlViewModel {
       }
     });
 
-    // 设置屏幕数据回调
+    // 设置屏幕数据回调：接收原始 RGBA 数据，创建 PixelMap
     this.dependencies.remoteControlService.setScreenCallback(
       (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
-        hilog.debug(DOMAIN, TAG, '收到屏幕数据: %{public}d x %{public}d', width, height);
-        const screenImage = new ScreenImage(data, width, height, timestamp);
-        this.handleScreenImage(screenImage);
+        hilog.info(DOMAIN, TAG, '收到屏幕数据: width=%{public}d, height=%{public}d, size=%{public}d bytes, timestamp=%{public}d', 
+          width, height, data.byteLength, timestamp);
+        // 在主线程创建 PixelMap
+        this.createPixelMapOnMainThread(data, width, height);
       }
     );
 
@@ -303,13 +307,57 @@ export class ControlViewModel {
       }, 1000);
     }
   }
+  /**
+   * 在主线程创建 PixelMap
+   */
+  private createPixelMapOnMainThread(data: ArrayBuffer, width: number, height: number): void {
+    // 直接在主线程中创建PixelMap，因为image.createPixelMap本身就应该在主线程执行
+    this.doCreatePixelMap(data, width, height);
+  }
+
+  /**
+   * 实际创建 PixelMap 的方法
+   */
+  private doCreatePixelMap(data: ArrayBuffer, width: number, height: number): void {
+    try {
+      hilog.info(DOMAIN, TAG, '开始创建 PixelMap: width=%{public}d, height=%{public}d, dataSize=%{public}d bytes', 
+        width, height, data.byteLength);
+      
+      const opts: image.InitializationOptions = {
+        editable: false,
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        size: { height, width }
+      };
+      
+      image.createPixelMap(data, opts).then((pixelMap: image.PixelMap) => {
+        hilog.info(DOMAIN, TAG, 'PixelMap 创建成功');
+        if (this.screenPixelMapCallback) {
+          hilog.info(DOMAIN, TAG, '调用 screenPixelMapCallback');
+          this.screenPixelMapCallback(pixelMap);
+          hilog.info(DOMAIN, TAG, 'screenPixelMapCallback 调用成功');
+        } else {
+          hilog.warn(DOMAIN, TAG, 'screenPixelMapCallback 未设置');
+        }
+      }).catch((err: Error) => {
+        hilog.error(DOMAIN, TAG, 'createPixelMap failed: %{public}s', JSON.stringify(err));
+        if (err.stack) {
+          hilog.error(DOMAIN, TAG, 'Error stack: %{public}s', err.stack);
+        }
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'doCreatePixelMap error: %{public}s', JSON.stringify(error));
+      if (error instanceof Error && error.stack) {
+        hilog.error(DOMAIN, TAG, 'Error stack: %{public}s', error.stack);
+      }
+    }
+  }
 
   /**
    * 清理资源
    */
   dispose(): void {
     hilog.info(DOMAIN, TAG, 'ControlViewModel 清理资源');
-    
+
     // 清除长按定时器
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);
@@ -334,7 +382,7 @@ export class ControlViewModel {
     const remoteDeviceId = this.state.remoteDeviceId;
     const remoteDevicePassword = this.state.remoteDevicePassword;
     const connectionState = this.state.connectionState;
-    
+
     hilog.info(DOMAIN, TAG, '打开远程屏幕 - deviceId: %{public}s, state: %{public}s',
       remoteDeviceId, connectionState);
 
@@ -364,56 +412,6 @@ export class ControlViewModel {
         remoteDeviceId,
         remoteDevicePassword
       );
-    }
-  }
-
-  /**
-   * 处理屏幕图像数据
-   */
-  private handleScreenImage(screenData: ScreenImage): void {
-    this.updateState({
-      screenWidth: screenData.width,
-      screenHeight: screenData.height
-    });
-    
-    this.createPixelMapFromRawData(screenData.data, screenData.width, screenData.height);
-  }
-
-  /**
-   * 从原始像素数据创建 PixelMap
-   */
-  private createPixelMapFromRawData(buffer: ArrayBuffer, width: number, height: number): void {
-    try {
-      const expectedSize = width * height * 4; // ARGB 格式每个像素 4 字节
-      if (buffer.byteLength !== expectedSize) {
-        hilog.warn(DOMAIN, TAG, '图像数据大小不匹配: 期望 %{public}d, 实际 %{public}d',
-          expectedSize, buffer.byteLength);
-      }
-
-      const opts: image.InitializationOptions = {
-        size: { height, width },
-        pixelFormat: image.PixelMapFormat.ARGB_8888,
-        editable: false,
-        alphaType: image.AlphaType.OPAQUE
-      };
-
-      image.createPixelMap(buffer, opts)
-        .then((pixelMap: image.PixelMap) => {
-          this.updateState({ screenImage: pixelMap });
-          if (this.screenImageCallback) {
-            this.screenImageCallback(pixelMap, width, height);
-          }
-        })
-        .catch((error: Error) => {
-          hilog.error(DOMAIN, TAG, '创建 PixelMap 失败: %{public}s', JSON.stringify(error));
-          this.updateState({ screenImage: null });
-          if (this.screenImageCallback) {
-            this.screenImageCallback(null, width, height);
-          }
-        });
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, '处理图像失败: %{public}s', JSON.stringify(error));
-      this.updateState({ screenImage: null });
     }
   }
 
@@ -520,9 +518,24 @@ export class ControlViewModel {
    * 处理三指滑动
    */
   handleThreeFingerPan(offsetY: number): void {
-    // 向上滑动超过阈值，打开设置页面
-    if (offsetY < -50) {
-      this.navigateTo('pages/Settings');
+    // 根据滑动距离的正负判断方向
+    // offsetY > 0 表示向上滑动
+    // 向上滑动显示工具栏，向下滑动隐藏工具栏
+    const SWIPE_THRESHOLD = 50; // 滑动超过50px才触发
+    if (Math.abs(offsetY) < SWIPE_THRESHOLD) return;
+
+    if (offsetY > 0) {
+      // 向上滑动：显示工具栏
+      if (!this.state.isToolbarVisible) {
+        this.updateState({ isToolbarVisible: true });
+        this.showToast('工具栏已显示');
+      }
+    } else {
+      // 向下滑动：隐藏工具栏
+      if (this.state.isToolbarVisible) {
+        this.updateState({ isToolbarVisible: false });
+        this.showToast('工具栏已隐藏');
+      }
     }
   }
 

@@ -10,19 +10,17 @@ import {
   DecompressResult
 } from './IImageDecompressor';
 import { Compressor, CompressionMethod } from './Compressor';
-import { TileCache, NullTileCache } from './TileCache';
+
 import { Capture } from './Capture';
 import { MemByteBuffer } from './MemByteBuffer';
 
 export class ImageDecompressorImpl implements IImageDecompressor {
   private config: DecompressorConfig | null = null;
-  private tileCache: TileCache = new NullTileCache();
   private decompressTimes: number[] = [];
   private isInitialized = false;
 
   init(config: DecompressorConfig): void {
     this.config = config;
-    this.tileCache = config.useTileCache ? new NullTileCache() : new NullTileCache();
     this.isInitialized = true;
     console.info('ImageDecompressorImpl: Initialized');
   }
@@ -42,10 +40,7 @@ export class ImageDecompressorImpl implements IImageDecompressor {
       const compressor = Compressor.get(this.config.compressionMethod);
 
       // 解压
-      const capture = await compressor.decompress(this.tileCache, zippedData);
-
-      // 通知缓存处理完成
-      this.tileCache.onCaptureProcessed();
+      const capture = await compressor.decompress(zippedData);
 
       const elapsedTime = Date.now() - startTime;
       this.recordDecompressTime(elapsedTime);
@@ -71,7 +66,6 @@ export class ImageDecompressorImpl implements IImageDecompressor {
 
   reset(): void {
     this.decompressTimes = [];
-    this.tileCache = this.config?.useTileCache ? new NullTileCache() : new NullTileCache();
     console.info('ImageDecompressorImpl: Reset');
   }
 

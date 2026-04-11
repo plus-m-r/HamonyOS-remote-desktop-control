@@ -101,11 +101,11 @@ public final class ScreenUtilities {
         byte[] bytes = new byte[4 * ints.length];
         int byteIndex = 0;
         for (int argb : ints) {
-            // ARGB格式：alpha, red, green, blue
-            bytes[byteIndex++] = (byte) ((argb >> 24) & 0xFF); // Alpha
-            bytes[byteIndex++] = (byte) ((argb >> 16) & 0xFF); // Red
-            bytes[byteIndex++] = (byte) ((argb >> 8) & 0xFF);  // Green
+            // BGRA格式：blue, green, red, alpha
             bytes[byteIndex++] = (byte) (argb & 0xFF);         // Blue
+            bytes[byteIndex++] = (byte) ((argb >> 8) & 0xFF);  // Green
+            bytes[byteIndex++] = (byte) ((argb >> 16) & 0xFF); // Red
+            bytes[byteIndex++] = (byte) ((argb >> 24) & 0xFF); // Alpha
         }
         return bytes;
     }

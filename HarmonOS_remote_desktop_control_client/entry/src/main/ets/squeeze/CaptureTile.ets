@@ -1,5 +1,6 @@
 import { MemByteBuffer } from './MemByteBuffer';
 import { XYWH } from './XYWH';
+import { ChecksumUtils } from '../utils/ChecksumUtils';
 
 export class CaptureTile {
   static readonly MISSING: CaptureTile = new CaptureTile(-1, -1, -1, -1, -1, null, -1, false);
@@ -35,19 +36,22 @@ export class CaptureTile {
 
   static fromSingleLevel(xywh: XYWH, singleLevel: number): CaptureTile {
     const data = new Uint8Array(xywh.w * xywh.h * 4);
-    // BGRA格式：B, G, R, A
+    // RGBA格式：R, G, B, A
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = singleLevel;     // B
+      data[i] = singleLevel;     // R
       data[i + 1] = singleLevel; // G
-      data[i + 2] = singleLevel; // R
+      data[i + 2] = singleLevel; // B
       data[i + 3] = 0xff;        // A (不透明)
     }
     const capture = MemByteBuffer.fromArray(data);
-    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
+    const checksum = CaptureTile.computeChecksum(data);
+    return new CaptureTile(checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
   }
 
   static fromCapture(xywh: XYWH, capture: MemByteBuffer): CaptureTile {
-    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, false);
+    const data = capture.getInternal();
+    const checksum = CaptureTile.computeChecksum(data);
+    return new CaptureTile(checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, false);
   }
 
   static fromCache(xywh: XYWH, cached: CaptureTile): CaptureTile {
@@ -55,9 +59,18 @@ export class CaptureTile {
     if (cached === CaptureTile.MISSING) {
       const data = new Uint8Array(xywh.w * xywh.h * 4);
       capture = MemByteBuffer.fromArray(data);
+      return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
     } else {
       capture = cached.capture;
+      return new CaptureTile(cached.checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
     }
-    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
+  }
+
+  /**
+   * 计算Adler32校验和
+   * 与Java客户端保持一致
+   */
+  private static computeChecksum(data: Uint8Array): number {
+    return ChecksumUtils.computeAdler32(data);
   }
 }

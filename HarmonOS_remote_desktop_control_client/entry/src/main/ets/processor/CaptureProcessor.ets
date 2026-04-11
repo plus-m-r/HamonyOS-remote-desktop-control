@@ -30,7 +30,6 @@ export interface PrevBufferParams {
 }
 
 export class CaptureProcessor {
-  private prevBuffer: Uint8Array | null = null;
   private prevWidth: number = 0;
   private prevHeight: number = 0;
   private frameCount: number = 0;
@@ -44,7 +43,6 @@ export class CaptureProcessor {
     const reset = frameInfo.reset;
     const width = frameInfo.width;
     const height = frameInfo.height;
-    const bufferSize = width * height * 4;
 
     if (id <= this.lastFrameId && this.lastFrameId !== -1) {
       hilog.warn(DOMAIN, TAG, 'Frame ID not increasing: %{public}d -> %{public}d', this.lastFrameId, id);
@@ -55,14 +53,9 @@ export class CaptureProcessor {
       id, reset.toString(), width, height);
 
     if (reset || this.prevWidth !== width || this.prevHeight !== height) {
-      this.prevBuffer = new Uint8Array(bufferSize);
       this.prevWidth = width;
       this.prevHeight = height;
-      hilog.info(DOMAIN, TAG, 'Keyframe or resolution changed, allocated new prevBuffer');
-    }
-
-    if (this.prevBuffer) {
-      this.prevBuffer.set(imageBuffer);
+      hilog.info(DOMAIN, TAG, 'Keyframe or resolution changed');
     }
 
     this.frameCount++;
@@ -76,13 +69,12 @@ export class CaptureProcessor {
   }
 
   getPrevBufferParams(): PrevBufferParams {
-    const localBuffer: ArrayBuffer | null = this.prevBuffer ? this.prevBuffer.buffer as ArrayBuffer : null;
-    const localWidth: number = this.prevWidth;
-    const localHeight: number = this.prevHeight;
+    // 直接返回null作为buffer，因为我们不再使用prevBuffer来存储前一帧的内容
+    // 这样RemoteControlService会为每一帧创建一个新的缓冲区
     return {
-      buffer: localBuffer,
-      width: localWidth,
-      height: localHeight
+      buffer: null,
+      width: this.prevWidth,
+      height: this.prevHeight
     };
   }
 
@@ -90,12 +82,11 @@ export class CaptureProcessor {
     return {
       frameCount: this.frameCount,
       lastFrameId: this.lastFrameId,
-      bufferSize: this.prevBuffer ? this.prevBuffer.length : 0
+      bufferSize: 0
     };
   }
 
   reset(): void {
-    this.prevBuffer = null;
     this.prevWidth = 0;
     this.prevHeight = 0;
     this.frameCount = 0;
