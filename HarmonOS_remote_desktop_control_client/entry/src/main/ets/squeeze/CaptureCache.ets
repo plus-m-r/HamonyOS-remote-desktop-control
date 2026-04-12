@@ -12,6 +12,8 @@ export class CaptureCache {
   private cache: Map<number, CacheEntry> = new Map();
   // 预捕获对象，用于生成PixelMap
   private preCapture: Capture | null = null;
+  // PixelMap队列，存储待显示的PixelMap
+  private pixelMapQueue: image.PixelMap[] = [];
   
   private readonly maxSize: number;
   private readonly purgeSize: number;
@@ -108,6 +110,8 @@ export class CaptureCache {
       // 如果处理了至少一个capture且所有瓦片都非空，则生成PixelMap
       if (processedCount > 0 && allTilesNonEmpty) {
         this.createAndCachePixelMap().then(pixelMap => {
+          // 将生成的PixelMap添加到队列中
+          this.pixelMapQueue.push(pixelMap);
           resolve(pixelMap);
         }).catch(() => {
           resolve(null);
@@ -277,6 +281,8 @@ export class CaptureCache {
         }
       }
     }
+    // 清空PixelMap队列
+    this.clearPixelMapQueue();
     this.cache.clear();
     this.hits = 0;
   }
@@ -302,6 +308,40 @@ export class CaptureCache {
    */
   resetHits(): void {
     this.hits = 0;
+  }
+
+  /**
+   * 从PixelMap队列中取出一个PixelMap用于显示
+   * @returns image.PixelMap | null 队列中的第一个PixelMap，如果队列为空则返回null
+   */
+  dequeuePixelMap(): image.PixelMap | null {
+    if (this.pixelMapQueue.length > 0) {
+      return this.pixelMapQueue.shift() || null;
+    }
+    return null;
+  }
+
+  /**
+   * 获取PixelMap队列的大小
+   * @returns number 队列中的PixelMap数量
+   */
+  getPixelMapQueueSize(): number {
+    return this.pixelMapQueue.length;
+  }
+
+  /**
+   * 清空PixelMap队列
+   */
+  clearPixelMapQueue(): void {
+    // 释放队列中所有PixelMap资源
+    for (const pixelMap of this.pixelMapQueue) {
+      try {
+        pixelMap.release();
+      } catch (error) {
+        // 忽略释放错误
+      }
+    }
+    this.pixelMapQueue = [];
   }
 
   /**
