@@ -5,6 +5,7 @@ import { ServiceProvider } from '../di/ServiceProvider';
 import { appStateManager } from '../state/AppStateManager';
 import { ContextManager } from '../utils/ContextManager';
 import { GlobalContext } from '../utils/GlobalContext';
+import { DependencyInitializer } from '../utils/DependencyInitializer';
 
 // 日志域标识，用于区分不同模块的日志输出
 const DOMAIN = 0x0000;
@@ -45,6 +46,9 @@ export default class EntryAbility extends UIAbility {
     // 初始化 ContextManager，保存应用上下文供全局使用
     // ContextManager 是一个单例类，用于在应用各处获取 Ability 上下文
     ContextManager.getInstance().setContext(this.context);
+    
+    // 初始化依赖注入容器
+    DependencyInitializer.initialize();
     
     // 初始化远程控制服务并建立与远程桌面服务器的连接
     this.initializeServices();

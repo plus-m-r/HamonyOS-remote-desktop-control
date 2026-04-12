@@ -1,0 +1,33 @@
+/**
+ * 依赖初始化器
+ * 
+ * 用于在应用启动时注册所有依赖项
+ */
+import { DependencyContainer, DependencyKeys } from './DependencyContainer';
+import { CaptureCache } from '../squeeze/CaptureCache';
+import hilog from '@ohos.hilog';
+
+const DOMAIN = 0xFF00;
+const TAG = 'DependencyInitializer';
+
+export class DependencyInitializer {
+  /**
+   * 初始化所有依赖项
+   */
+  public static initialize(): void {
+    const container = DependencyContainer.getInstance();
+    
+    // 注册CaptureCache为单例
+    container.register<CaptureCache>(
+      DependencyKeys.CAPTURE_CACHE,
+      () => {
+        const captureCache = new CaptureCache(50, 25);
+        hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton');
+        return captureCache;
+      },
+      true
+    );
+    
+    hilog.info(DOMAIN, TAG, 'Dependencies initialized');
+  }
+}

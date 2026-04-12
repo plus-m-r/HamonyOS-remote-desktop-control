@@ -43,6 +43,7 @@ import { Compressor, CompressionMethod } from '../../squeeze/Compressor';
 import { Capture } from '../../squeeze/Capture';
 import { CaptureCache } from '../../squeeze/CaptureCache';
 import { ChecksumUtils } from '../../utils/ChecksumUtils';
+import { DependencyContainer, DependencyKeys } from '../../utils/DependencyContainer';
 import hilog from '@ohos.hilog';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
@@ -89,7 +90,7 @@ export class RemoteControlService implements IRemoteControlService {
   private captureProcessor: CaptureProcessor = new CaptureProcessor();
 
   // Capture 缓存（用于存储处理后的Capture对象）
-  private captureCache: CaptureCache = new CaptureCache(50, 25);
+  private captureCache: CaptureCache;
 
 
 
@@ -138,8 +139,13 @@ export class RemoteControlService implements IRemoteControlService {
     this.heartbeatManager = heartbeatManager;
     this.workerRepository = workerRepository;
 
+    // 使用依赖注入获取CaptureCache实例
+    this.captureCache = DependencyContainer.getInstance().get<CaptureCache>(DependencyKeys.CAPTURE_CACHE);
+
     this.setupCallbacks();
     hilog.info(DOMAIN, TAG, 'RemoteControlService initialized');
+    hilog.info(DOMAIN, TAG, 'CaptureCache instance obtained via dependency injection');
+
   }
 
   /**
