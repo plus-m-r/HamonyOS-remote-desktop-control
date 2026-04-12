@@ -102,8 +102,11 @@ export class CaptureCache {
         this.remove(id);
       }
 
-      // 如果处理了至少一个capture，则生成PixelMap
-      if (processedCount > 0) {
+      // 检查preCapture中所有的位置瓦片是否非空
+      const allTilesNonEmpty = this.checkAllTilesNonEmpty();
+      
+      // 如果处理了至少一个capture且所有瓦片都非空，则生成PixelMap
+      if (processedCount > 0 && allTilesNonEmpty) {
         this.createAndCachePixelMap().then(pixelMap => {
           resolve(pixelMap);
         }).catch(() => {
@@ -113,6 +116,31 @@ export class CaptureCache {
         resolve(null);
       }
     });
+  }
+
+  /**
+   * 检查preCapture中所有的位置瓦片是否非空
+   * 使用哈希表来高效检验
+   * @returns boolean 如果所有瓦片都非空则返回true，否则返回false
+   */
+  private checkAllTilesNonEmpty(): boolean {
+    if (!this.preCapture) {
+      return false;
+    }
+
+    // 使用哈希表来跟踪非空瓦片的位置
+    const nonEmptyTiles = new Set<number>();
+    
+    // 遍历preCapture的所有瓦片
+    for (let i = 0; i < this.preCapture.dirtyTiles.length; i++) {
+      const tile = this.preCapture.dirtyTiles[i];
+      if (tile !== null && tile.capture !== null) {
+        nonEmptyTiles.add(i);
+      }
+    }
+    
+    // 检查非空瓦片的数量是否等于总瓦片数量
+    return nonEmptyTiles.size === this.preCapture.dirtyTiles.length;
   }
 
   /**
