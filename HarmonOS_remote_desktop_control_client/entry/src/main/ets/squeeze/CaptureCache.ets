@@ -3,6 +3,7 @@ import { CaptureTile } from './CaptureTile';
 import { image } from '@kit.ImageKit';
 import { RegularRunLengthEncoder } from './RunLengthEncoder';
 import { MemByteBuffer } from './MemByteBuffer';
+import { ILifecycleAware } from '../lifecycle/ILifecycleManager';
 
 /**
  * Capture缓存类
@@ -10,7 +11,7 @@ import { MemByteBuffer } from './MemByteBuffer';
  * 用于缓存Capture对象和对应的PixelMap，实现LRU（最近最少使用）策略，
  * 提高远程桌面控制的性能和效率。
  */
-export class CaptureCache {
+export class CaptureCache implements ILifecycleAware {
   // 缓存队列，存储Capture和对应的PixelMap
   private cache: Map<number, CacheEntry> = new Map();
   // 预捕获对象，用于生成PixelMap
@@ -380,6 +381,57 @@ export class CaptureCache {
       }
       this.cache.delete(entry.capture.id);
     }
+  }
+
+  /**
+   * 创建时调用
+   */
+  onCreate(): void {
+    console.log('CaptureCache onCreate');
+    // 初始化缓存
+    this.cache = new Map();
+    this.pixelMapQueue = [];
+  }
+
+  /**
+   * 启动时调用
+   */
+  onStart(): void {
+    console.log('CaptureCache onStart');
+    // 启动时的初始化操作
+  }
+
+  /**
+   * 恢复时调用
+   */
+  onResume(): void {
+    console.log('CaptureCache onResume');
+    // 恢复时的操作
+  }
+
+  /**
+   * 暂停时调用
+   */
+  onPause(): void {
+    console.log('CaptureCache onPause');
+    // 暂停时的操作
+  }
+
+  /**
+   * 停止时调用
+   */
+  onStop(): void {
+    console.log('CaptureCache onStop');
+    // 停止时的操作
+  }
+
+  /**
+   * 销毁时调用
+   */
+  onDestroy(): void {
+    console.log('CaptureCache onDestroy');
+    // 清理资源
+    this.clear();
   }
 }
 

@@ -6,6 +6,7 @@ import { appStateManager } from '../state/AppStateManager';
 import { ContextManager } from '../utils/ContextManager';
 import { GlobalContext } from '../utils/GlobalContext';
 import { DependencyInitializer } from '../utils/DependencyInitializer';
+import { DependencyContainer } from '../utils/DependencyContainer';
 
 // 日志域标识，用于区分不同模块的日志输出
 const DOMAIN = 0x0000;
@@ -50,6 +51,11 @@ export default class EntryAbility extends UIAbility {
     // 初始化依赖注入容器
     DependencyInitializer.initialize();
     
+    // 触发生命周期管理器的创建事件
+    const container = DependencyContainer.getInstance();
+    const lifecycleManager = container.getLifecycleManager();
+    lifecycleManager.create();
+    
     // 初始化远程控制服务并建立与远程桌面服务器的连接
     this.initializeServices();
   }
@@ -70,6 +76,11 @@ export default class EntryAbility extends UIAbility {
     
     // 断开与远程桌面服务器的连接，释放网络资源
     this.disconnectServices();
+    
+    // 触发生命周期管理器的销毁事件
+    const container = DependencyContainer.getInstance();
+    const lifecycleManager = container.getLifecycleManager();
+    lifecycleManager.destroy();
   }
 
   /**
@@ -117,6 +128,11 @@ export default class EntryAbility extends UIAbility {
    */
   onForeground(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    
+    // 触发生命周期管理器的恢复事件
+    const container = DependencyContainer.getInstance();
+    const lifecycleManager = container.getLifecycleManager();
+    lifecycleManager.resume();
   }
 
   /**
@@ -128,6 +144,11 @@ export default class EntryAbility extends UIAbility {
    */
   onBackground(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    
+    // 触发生命周期管理器的暂停事件
+    const container = DependencyContainer.getInstance();
+    const lifecycleManager = container.getLifecycleManager();
+    lifecycleManager.pause();
   }
   
   /**

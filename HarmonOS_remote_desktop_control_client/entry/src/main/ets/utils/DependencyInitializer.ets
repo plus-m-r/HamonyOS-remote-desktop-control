@@ -17,15 +17,16 @@ export class DependencyInitializer {
   public static initialize(): void {
     const container = DependencyContainer.getInstance();
     
-    // 注册CaptureCache为单例
+    // 注册CaptureCache为单例，并支持生命周期管理
     container.register<CaptureCache>(
       DependencyKeys.CAPTURE_CACHE,
       () => {
         const captureCache = new CaptureCache(50, 25);
-        hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton');
+        hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton with lifecycle support');
         return captureCache;
       },
-      true
+      true,
+      true // 启用生命周期管理
     );
     
     hilog.info(DOMAIN, TAG, 'Dependencies initialized');
