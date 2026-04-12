@@ -46,12 +46,16 @@ export class CaptureCache {
   /**
    * 自动处理不完整的capture，将其瓦片信息覆盖到preCapture中
    * 循环从缓存中提取不完整的capture，将其所具有的瓦片信息高效覆盖preCapture中对应位置的瓦片信息
+   * 处理完成后，将已利用的不完整capture从缓存中移除
    */
   processIncompleteCaptures(): void {
     // 检查preCapture是否存在
     if (!this.preCapture) {
       return;
     }
+
+    // 收集需要移除的capture ID
+    const toRemove: number[] = [];
 
     // 遍历缓存中的所有capture
     for (const entry of this.cache.values()) {
@@ -63,6 +67,9 @@ export class CaptureCache {
           capture.tileWidth === this.preCapture.tileWidth && 
           capture.tileHeight === this.preCapture.tileHeight) {
         
+        // 标记为需要移除
+        toRemove.push(capture.id);
+        
         // 遍历capture的dirtyTiles
         for (let i = 0; i < capture.dirtyTiles.length; i++) {
           const tile = capture.dirtyTiles[i];
@@ -73,6 +80,11 @@ export class CaptureCache {
           }
         }
       }
+    }
+
+    // 移除已处理的不完整capture
+    for (const id of toRemove) {
+      this.remove(id);
     }
   }
 
