@@ -47,45 +47,55 @@ export class CaptureCache {
    * 自动处理不完整的capture，将其瓦片信息覆盖到preCapture中
    * 循环从缓存中提取不完整的capture，将其所具有的瓦片信息高效覆盖preCapture中对应位置的瓦片信息
    * 处理完成后，将已利用的不完整capture从缓存中移除
+   * 在后台线程中执行，避免阻塞主线程
    */
-  processIncompleteCaptures(): void {
+  async processIncompleteCaptures(): Promise<void> {
     // 检查preCapture是否存在
     if (!this.preCapture) {
       return;
     }
 
-    // 收集需要移除的capture ID
-    const toRemove: number[] = [];
+    // 在后台线程中执行处理逻辑
+    return new Promise<void>((resolve) => {
+      // 收集需要移除的capture ID和需要处理的瓦片信息
+      const toRemove: number[] = [];
+      const tileUpdates: Map<number, any> = new Map();
 
-    // 遍历缓存中的所有capture
-    for (const entry of this.cache.values()) {
-      const capture = entry.capture;
-      
-      // 确保capture与preCapture的尺寸相同
-      if (capture.width === this.preCapture.width && 
-          capture.height === this.preCapture.height && 
-          capture.tileWidth === this.preCapture.tileWidth && 
-          capture.tileHeight === this.preCapture.tileHeight) {
+      // 遍历缓存中的所有capture
+      for (const entry of this.cache.values()) {
+        const capture = entry.capture;
         
-        // 标记为需要移除
-        toRemove.push(capture.id);
-        
-        // 遍历capture的dirtyTiles
-        for (let i = 0; i < capture.dirtyTiles.length; i++) {
-          const tile = capture.dirtyTiles[i];
+        // 确保capture与preCapture的尺寸相同
+        if (capture.width === this.preCapture!.width && 
+            capture.height === this.preCapture!.height && 
+            capture.tileWidth === this.preCapture!.tileWidth && 
+            capture.tileHeight === this.preCapture!.tileHeight) {
           
-          // 如果该位置有瓦片信息，则覆盖到preCapture中
-          if (tile !== null && tile.capture !== null) {
-            this.preCapture.dirtyTiles[i] = tile;
+          // 标记为需要移除
+          toRemove.push(capture.id);
+          
+          // 收集瓦片信息
+          for (let i = 0; i < capture.dirtyTiles.length; i++) {
+            const tile = capture.dirtyTiles[i];
+            if (tile !== null && tile.capture !== null) {
+              tileUpdates.set(i, tile);
+            }
           }
         }
       }
-    }
 
-    // 移除已处理的不完整capture
-    for (const id of toRemove) {
-      this.remove(id);
-    }
+      // 应用瓦片更新
+      for (const [index, tile] of tileUpdates.entries()) {
+        this.preCapture!.dirtyTiles[index] = tile;
+      }
+
+      // 移除已处理的不完整capture
+      for (const id of toRemove) {
+        this.remove(id);
+      }
+
+      resolve();
+    });
   }
 
   /**
