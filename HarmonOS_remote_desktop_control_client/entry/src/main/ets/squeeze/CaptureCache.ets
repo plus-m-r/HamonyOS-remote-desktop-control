@@ -48,21 +48,28 @@ export class CaptureCache {
    * 循环从缓存中提取不完整的capture，将其所具有的瓦片信息高效覆盖preCapture中对应位置的瓦片信息
    * 处理完成后，将已利用的不完整capture从缓存中移除
    * 在后台线程中执行，避免阻塞主线程
+   * @param maxCaptures 最大处理不完整capture数量，默认为2
+   * @returns Promise<image.PixelMap | null> 生成的PixelMap，如果未生成则返回null
    */
-  async processIncompleteCaptures(): Promise<void> {
+  async processIncompleteCaptures(maxCaptures: number = 2): Promise<image.PixelMap | null> {
     // 检查preCapture是否存在
     if (!this.preCapture) {
-      return;
+      return null;
     }
 
     // 在后台线程中执行处理逻辑
-    return new Promise<void>((resolve) => {
+    return new Promise<image.PixelMap | null>((resolve) => {
       // 收集需要移除的capture ID和需要处理的瓦片信息
       const toRemove: number[] = [];
       const tileUpdates: Map<number, any> = new Map();
 
-      // 遍历缓存中的所有capture
+      // 遍历缓存中的所有capture，最多处理maxCaptures个
+      let processedCount = 0;
       for (const entry of this.cache.values()) {
+        if (processedCount >= maxCaptures) {
+          break;
+        }
+        
         const capture = entry.capture;
         
         // 确保capture与preCapture的尺寸相同
@@ -73,6 +80,7 @@ export class CaptureCache {
           
           // 标记为需要移除
           toRemove.push(capture.id);
+          processedCount++;
           
           // 收集瓦片信息
           for (let i = 0; i < capture.dirtyTiles.length; i++) {
@@ -94,7 +102,16 @@ export class CaptureCache {
         this.remove(id);
       }
 
-      resolve();
+      // 如果处理了至少一个capture，则生成PixelMap
+      if (processedCount > 0) {
+        this.createAndCachePixelMap().then(pixelMap => {
+          resolve(pixelMap);
+        }).catch(() => {
+          resolve(null);
+        });
+      } else {
+        resolve(null);
+      }
     });
   }
 
