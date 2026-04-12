@@ -627,17 +627,9 @@ export class RemoteControlService implements IRemoteControlService {
         hilog.info(DOMAIN, TAG, 'Capture cache hit for id: %{public}d', capture.id);
         capture = cachedCapture;
       } else {
-        // 检查Capture是否完整（是否包含所有瓦片信息）
-        const isComplete = capture.dirtyTiles.every(tile => tile !== null);
-        
-        // 根据Capture是否完整，添加到相应的缓存队列
-        if (isComplete) {
-          this.captureCache.addComplete(capture);
-          hilog.info(DOMAIN, TAG, 'Capture cache miss, added to complete cache: %{public}d', capture.id);
-        } else {
-          this.captureCache.addIncomplete(capture);
-          hilog.info(DOMAIN, TAG, 'Capture cache miss, added to incomplete cache: %{public}d', capture.id);
-        }
+        // 将新的Capture添加到缓存
+        this.captureCache.add(capture);
+        hilog.info(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
       }
       
       const captureWidth = capture.width;
