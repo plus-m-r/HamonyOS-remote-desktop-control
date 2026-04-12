@@ -44,6 +44,39 @@ export class CaptureCache {
   }
 
   /**
+   * 自动处理不完整的capture，将其瓦片信息覆盖到preCapture中
+   * 循环从缓存中提取不完整的capture，将其所具有的瓦片信息高效覆盖preCapture中对应位置的瓦片信息
+   */
+  processIncompleteCaptures(): void {
+    // 检查preCapture是否存在
+    if (!this.preCapture) {
+      return;
+    }
+
+    // 遍历缓存中的所有capture
+    for (const entry of this.cache.values()) {
+      const capture = entry.capture;
+      
+      // 确保capture与preCapture的尺寸相同
+      if (capture.width === this.preCapture.width && 
+          capture.height === this.preCapture.height && 
+          capture.tileWidth === this.preCapture.tileWidth && 
+          capture.tileHeight === this.preCapture.tileHeight) {
+        
+        // 遍历capture的dirtyTiles
+        for (let i = 0; i < capture.dirtyTiles.length; i++) {
+          const tile = capture.dirtyTiles[i];
+          
+          // 如果该位置有瓦片信息，则覆盖到preCapture中
+          if (tile !== null && tile.capture !== null) {
+            this.preCapture.dirtyTiles[i] = tile;
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * 添加Capture到缓存
    * @param capture 要缓存的Capture对象
    */
