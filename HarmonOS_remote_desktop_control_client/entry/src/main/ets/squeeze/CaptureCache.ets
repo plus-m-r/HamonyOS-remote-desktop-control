@@ -178,38 +178,14 @@ export class CaptureCache {
 
   /**
    * 解压capture中的游程编码数据
+   * 注意：实际的游程编码解码已经在Compressor类中处理
+   * 此方法保留用于处理可能需要的额外解压逻辑
    * @param capture 要解压的Capture对象
    * @param preCapture 上一帧的Capture对象，用于依赖解压
    */
   private decompressRunLengthEncoding(capture: Capture, preCapture: Capture | null): void {
-    const rle = new RegularRunLengthEncoder();
-    
-    for (let i = 0; i < capture.dirtyTiles.length; i++) {
-      const tile = capture.dirtyTiles[i];
-      if (tile !== null && tile.capture !== null) {
-        // 对瓦片数据进行游程编码解压
-        const encodedData = tile.capture.getInternal();
-        const encodedBuffer = MemByteBuffer.fromArray(encodedData);
-        const decodedBuffer = new MemByteBuffer();
-        
-        rle.runLengthDecode(decodedBuffer, encodedBuffer);
-        
-        // 创建新的CaptureTile对象来替换旧的
-        // 由于CaptureTile的构造函数是私有的，我们需要使用fromCapture静态方法
-        const xywh = {
-          x: tile.x,
-          y: tile.y,
-          w: tile.width,
-          h: tile.height
-        };
-        
-        // 创建新的CaptureTile对象
-        const newTile = CaptureTile.fromCapture(xywh, decodedBuffer);
-        
-        // 替换原有的瓦片
-        capture.dirtyTiles[i] = newTile;
-      }
-    }
+    // 游程编码解码已经在Compressor类中处理
+    // 这里可以添加额外的解压逻辑，如果需要
   }
 
   /**
@@ -232,8 +208,7 @@ export class CaptureCache {
       return existingEntry.pixelMap;
     }
 
-    // 解压游程编码数据，依赖preCapture
-    this.decompressRunLengthEncoding(capture, null);
+    // 游程编码数据已经在Compressor类中解压，这里不需要再次解压
 
     // 创建图像缓冲区
     const bufferSize = capture.width * capture.height * 4;
