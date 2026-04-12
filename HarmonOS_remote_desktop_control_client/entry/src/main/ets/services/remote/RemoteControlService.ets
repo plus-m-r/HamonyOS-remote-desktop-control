@@ -632,6 +632,9 @@ export class RemoteControlService implements IRemoteControlService {
         hilog.info(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
       }
       
+      // 设置预捕获对象
+      this.captureCache.setPreCapture(capture);
+      
       const captureWidth = capture.width;
       const captureHeight = capture.height;
       const tileWidth = capture.tileWidth;

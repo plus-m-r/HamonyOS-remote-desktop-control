@@ -10,6 +10,8 @@ import { image } from '@kit.ImageKit';
 export class CaptureCache {
   // 缓存队列，存储Capture和对应的PixelMap
   private cache: Map<number, CacheEntry> = new Map();
+  // 预捕获对象，用于生成PixelMap
+  private preCapture: Capture | null = null;
   
   private readonly maxSize: number;
   private readonly purgeSize: number;
@@ -23,6 +25,22 @@ export class CaptureCache {
   constructor(maxSize: number = 50, purgeSize: number = 25) {
     this.maxSize = maxSize;
     this.purgeSize = purgeSize;
+  }
+
+  /**
+   * 设置预捕获对象
+   * @param capture 预捕获的Capture对象
+   */
+  setPreCapture(capture: Capture): void {
+    this.preCapture = capture;
+  }
+
+  /**
+   * 获取预捕获对象
+   * @returns Capture对象，如果不存在则返回null
+   */
+  getPreCapture(): Capture | null {
+    return this.preCapture;
   }
 
   /**
@@ -52,11 +70,17 @@ export class CaptureCache {
   }
 
   /**
-   * 由完整的capture对象直接生成PixelMap并存储到缓存
-   * @param capture 完整的Capture对象
+   * 由预捕获对象直接生成PixelMap并存储到缓存
    * @returns Promise<image.PixelMap> 生成的PixelMap
    */
-  async createAndCachePixelMap(capture: Capture): Promise<image.PixelMap> {
+  async createAndCachePixelMap(): Promise<image.PixelMap> {
+    // 检查预捕获对象是否存在
+    if (!this.preCapture) {
+      throw new Error('PreCapture is not set');
+    }
+
+    const capture = this.preCapture;
+
     // 检查缓存中是否已存在该capture的PixelMap
     const existingEntry = this.cache.get(capture.id);
     if (existingEntry && existingEntry.pixelMap) {
