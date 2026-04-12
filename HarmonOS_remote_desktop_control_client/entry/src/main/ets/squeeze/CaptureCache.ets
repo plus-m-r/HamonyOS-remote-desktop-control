@@ -1,5 +1,8 @@
 import { Capture } from './Capture';
+import { CaptureTile } from './CaptureTile';
 import { image } from '@kit.ImageKit';
+import { RegularRunLengthEncoder } from './RunLengthEncoder';
+import { MemByteBuffer } from './MemByteBuffer';
 
 /**
  * Capture缓存类
@@ -174,6 +177,42 @@ export class CaptureCache {
   }
 
   /**
+   * 解压capture中的游程编码数据
+   * @param capture 要解压的Capture对象
+   * @param preCapture 上一帧的Capture对象，用于依赖解压
+   */
+  private decompressRunLengthEncoding(capture: Capture, preCapture: Capture | null): void {
+    const rle = new RegularRunLengthEncoder();
+    
+    for (let i = 0; i < capture.dirtyTiles.length; i++) {
+      const tile = capture.dirtyTiles[i];
+      if (tile !== null && tile.capture !== null) {
+        // 对瓦片数据进行游程编码解压
+        const encodedData = tile.capture.getInternal();
+        const encodedBuffer = MemByteBuffer.fromArray(encodedData);
+        const decodedBuffer = new MemByteBuffer();
+        
+        rle.runLengthDecode(decodedBuffer, encodedBuffer);
+        
+        // 创建新的CaptureTile对象来替换旧的
+        // 由于CaptureTile的构造函数是私有的，我们需要使用fromCapture静态方法
+        const xywh = {
+          x: tile.x,
+          y: tile.y,
+          w: tile.width,
+          h: tile.height
+        };
+        
+        // 创建新的CaptureTile对象
+        const newTile = CaptureTile.fromCapture(xywh, decodedBuffer);
+        
+        // 替换原有的瓦片
+        capture.dirtyTiles[i] = newTile;
+      }
+    }
+  }
+
+  /**
    * 由预捕获对象直接生成PixelMap并存储到缓存
    * @returns Promise<image.PixelMap> 生成的PixelMap
    */
@@ -192,6 +231,9 @@ export class CaptureCache {
       this.hits++;
       return existingEntry.pixelMap;
     }
+
+    // 解压游程编码数据，依赖preCapture
+    this.decompressRunLengthEncoding(capture, null);
 
     // 创建图像缓冲区
     const bufferSize = capture.width * capture.height * 4;

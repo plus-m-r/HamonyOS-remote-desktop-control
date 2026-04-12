@@ -20,7 +20,7 @@ export enum CompressionMethod {
 export class Compressor {
   private static readonly ZSTD_COMPRESSOR: Compressor = new Compressor(
     CompressionMethod.ZSTD,
-    new NullRunLengthEncoder(),
+    new RegularRunLengthEncoder(),
     new ZstdZipper()
   );
   private static loggedDecompressData: boolean = false;
