@@ -27,6 +27,12 @@ docs/
 │   ├── java-client-color-encoding.md
 │   ├── napi-zstd-scheme.md
 │   └── responsive-ui-adaptation.md
+├── development/              # 系统化开发文档
+│   ├── README.md
+│   ├── architecture.md
+│   ├── component-design.md
+│   ├── build-and-environment.md
+│   └── testing-and-quality.md
 └── api/                      # API 参考
     └── server-api.md
 ```
@@ -108,7 +114,23 @@ hvigorw test --tests "*ClipboardService*"
 
 ---
 
-### 5. API 参考 📡
+### 5. 系统化开发文档 📘
+
+**位置**: `docs/development/`
+
+| 文档名称 | 描述 |
+|---------|------|
+| [README.md](development/README.md) | 系统化开发文档目录和维护说明 |
+| [architecture.md](development/architecture.md) | 项目架构、模块分层、数据流说明 |
+| [component-design.md](development/component-design.md) | 组件设计与模块职责说明 |
+| [build-and-environment.md](development/build-and-environment.md) | 构建流程、开发环境、依赖管理 |
+| [testing-and-quality.md](development/testing-and-quality.md) | 测试策略、质量保障和文档一致性 |
+
+**适用人群**: 开发人员、技术负责人、测试工程师
+
+---
+
+### 6. API 参考 📡
 
 **位置**: `docs/api/`
 

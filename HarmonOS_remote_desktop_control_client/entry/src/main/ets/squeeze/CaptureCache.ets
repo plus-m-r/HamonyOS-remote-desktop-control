@@ -67,7 +67,7 @@ export class CaptureCache implements ILifecycleAware {
     return new Promise<image.PixelMap | null>((resolve) => {
       // 收集需要移除的capture ID和需要处理的瓦片信息
       const toRemove: number[] = [];
-      const tileUpdates: Map<number, any> = new Map();
+      const tileUpdates: Map<number, CaptureTile> = new Map();
 
       // 遍历缓存中的所有capture，最多处理maxCaptures个
       let processedCount = 0;
@@ -99,7 +99,10 @@ export class CaptureCache implements ILifecycleAware {
       }
 
       // 应用瓦片更新
-      for (const [index, tile] of tileUpdates.entries()) {
+      const entries = Array.from(tileUpdates.entries());
+      for (let i = 0; i < entries.length; i++) {
+        const index = entries[i][0];
+        const tile = entries[i][1];
         this.preCapture!.dirtyTiles[index] = tile;
       }
 

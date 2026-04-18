@@ -1,95 +1,149 @@
-[English](README.md) | [中文](README_zh.md)
+# 远程桌面控制项目
 
-### Remote Desktop Application
+## 项目简介
 
-This project is a **Java** and **Netty** based remote desktop control application. Through this application, users can
-connect and control remote devices in real-time. It is based on the client-server-client version of the core code
-from [Dayon GitHub Repository](https://github.com/RetGal/Dayon). Special thanks to the Dayon project author.
+这是一个跨平台的远程桌面控制系统，支持从HarmonyOS设备和Java客户端远程控制Windows/Mac/Linux等操作系统的计算机。
 
-If you have a higher frame rate requirement, you can check out my other remote desktop control project based on
-streaming media: https://github.com/SpringStudent/a-da
+### 主要功能
 
-### Features
+- ✅ 跨平台支持：服务端支持Windows、Mac、Linux；客户端支持HarmonyOS和Java
+- ✅ 高效屏幕捕获：基于tile的分块捕获，减少数据传输量
+- ✅ 智能压缩算法：结合ZSTD压缩和RLE编码，平衡传输速度和质量
+- ✅ 实时响应：优化的网络传输和异步处理，确保流畅的用户体验
+- ✅ 多客户端支持：服务端可同时处理多个客户端连接
 
-1. **Real-time Remote Desktop Control**
-    * Remotely control another device with minimal latency.
+## 技术栈
 
-2. **Customizable Settings**
-    * Configure screen capture intervals and enable/disable color mode to optimize performance.
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| 服务端 | Java | 11+ |
+| 服务端框架 | Spring Boot | 2.5+ |
+| 网络通信 | Netty | 4.1+ |
+| 压缩算法 | ZSTD | 1.5+ |
+| HarmonyOS客户端 | ArkTS | 3.0+ |
+| Java客户端 | Swing | - |
 
-3. **Cross-platform Support**
-    * Developed using Java, compatible with most operating systems.
+## 快速开始
 
-4. **Clipboard Support**
-    * No speed limit file transfer.
+### 1. 启动服务端
 
-5. **Multiscreen Support**
-    * View different screens in real time by selecting them.
+```bash
+# 编译打包
+cd server
+mvn clean package
 
-## Screenshots
+# 运行
+java -jar target/server-1.0.0.jar
+```
 
-### Main Control Panel
+### 2. 运行Java客户端
 
-![remote-desktop-control](z_launcher.png)
+```bash
+# 编译打包
+cd client
+mvn clean package
 
-### Remote Connection Established
+# 运行
+java -jar target/client-1.0.0.jar
+```
 
-![remote-desktop-control](z_screen.png)
+### 3. 运行HarmonyOS客户端
 
-![remote-desktop-control](z_monitor.png)
+1. 使用DevEco Studio打开项目 `HarmonOS_remote_desktop_control_client`
+2. 编译构建HAP包
+3. 安装到HarmonyOS设备
+4. 配置服务器地址（修改 `config.ets`）
 
-### Settings Menu
+## 配置说明
 
-![remote-desktop-control](z_screen_setting.png)
-![remote-desktop-control](z_compress_setting.png)
-![remote-desktop-control](z_clipboard.png)
+### 服务端配置 (`server/src/main/resources/application.properties`)
 
-### Environment
+```properties
+# 服务端口
+server.port=8080
 
-* Java 8 or higher
-* Maven for dependency management
+# 屏幕捕获配置
+capture.tile-size=32
+capture.fps=30
 
-### Build and Run
+# 压缩配置
+compression.level=3
+```
 
-1. Clone the repository：
-   ```bash
-   git https://github.com/SpringStudent/remote-desktop-control
-   cd remote-desktop-control
-   ```
+### Java客户端配置 (`client/config.properties`)
 
-2. Build the project:
-   ```bash
-   mvn clean install
-   ```
+```properties
+# 服务器地址
+server.host=127.0.0.1
+server.port=8080
 
-3. Run the server: Export remote-desktop-control.sql to mysql's databases,Modify the application.properties configuration file with the database information and the
-   netty.server.server and port configurations.
-   ```bash
-   RemoteServer.java
-   ```
+# 捕获配置
+capture.fps=30
+```
 
-4. Run the client: Modify the RemoteClient.java parameters for serverIp and serverPort and clipboardServer addr
-   ```bash
-   RemoteClient.java
-   ```
-### Demo Video
+### HarmonyOS客户端配置 (`HarmonOS_remote_desktop_control_client/entry/src/main/ets/config/config.ets`)
 
-[Bilibili Video](https://www.bilibili.com/video/BV11qNCeNEoZ/)
+```typescript
+export const SERVER_IP = '127.0.0.1';
+export const SERVER_PORT = 8080;
+export const MAX_FPS = 30;
+```
 
-### Future Plan
+## 项目结构
 
-* http-based clipboard transmission (finish)
-* multi-screen select support (finish)
-* internationalize  
+```
+HamonyOS-remote-desktop-control/
+├── server/             # Java服务端
+├── client/             # Java客户端
+├── HarmonOS_remote_desktop_control_client/  # HarmonyOS客户端
+├── docs/               # 项目文档
+└── latex_pdf/          # LaTeX文档
+```
 
-### Q&A
+## 核心功能模块
 
-* It is recommended that both the control end and the controlled end run the program with administrator privileges,
-  otherwise, some programs on the controlled end may not be controllable due to lack of permissions.
-* For the best control experience, it is recommended to set the input language preference on the control end to "
-  English (United States)".
-* The stability of this project has been verified in production environments and is ready for reliable use.
-* In the Windows lock screen scenario, it is not possible to capture screenshots or simulate keyboard and mouse events. Refer to the following project for a solution
-  https://github.com/SpringStudent/windows-lock-helper
-* The robots project is a service introduced to address the issue of being unable to capture screens in Windows lock screen scenarios. 
-  This service is not required for non-Windows systems and does not need to be started. For instructions on using this service, please refer to the windows-lock-helper project.
+1. **屏幕捕获模块**：使用Java AWT Robot进行屏幕捕获，支持分块处理
+2. **压缩解压模块**：结合ZSTD和RLE算法，优化数据传输
+3. **网络通信模块**：基于Netty的高性能网络通信
+4. **客户端UI模块**：HarmonyOS和Java客户端的用户界面
+5. **异步处理模块**：使用任务队列和线程池，提高性能
+
+## 性能优化
+
+- **增量更新**：只传输变化的屏幕区域
+- **智能压缩**：ZSTD + RLE组合压缩
+- **异步处理**：使用任务队列和线程池
+- **内存优化**：减少内存分配和拷贝
+- **网络优化**：调整TCP参数，提高传输效率
+
+## 常见问题
+
+### 连接失败
+- 检查网络连接和服务器状态
+- 确保防火墙允许指定端口的连接
+- 确认使用正确的IP地址
+
+### 屏幕显示异常
+- 确保客户端和服务端使用相同的压缩配置
+- 检查客户端设备的屏幕分辨率支持
+
+### 性能卡顿
+- 降低捕获帧率以减少网络带宽使用
+- 调整压缩级别以提高速度
+- 关闭不必要的应用，减少系统负载
+
+## 未来计划
+
+- ✅ 支持文件传输
+- ✅ 支持音频传输
+- ✅ 多显示器支持
+- ✅ 远程开关机
+- ✅ WebRTC集成
+
+## 技术文档
+
+详细的技术文档请参考 `docs/project_documentation.md`。
+
+## 许可证
+
+本项目采用 MIT 许可证。

@@ -9,7 +9,7 @@ import { ILifecycleAware } from '../lifecycle/ILifecycleManager';
 
 export class DependencyContainer {
   private static instance: DependencyContainer;
-  private dependencies: Map<string, any> = new Map();
+  private dependencies: Map<string, object | (() => object)> = new Map();
   private lifecycleManager: LifecycleManager;
 
   /**
@@ -38,17 +38,17 @@ export class DependencyContainer {
    * @param singleton 是否为单例，默认为true
    * @param lifecycleAware 是否为生命周期感知对象，默认为false
    */
-  public register<T>(key: string, factory: () => T, singleton: boolean = true, lifecycleAware: boolean = false): void {
+  public register<T extends object>(key: string, factory: () => T, singleton: boolean = true, lifecycleAware: boolean = false): void {
     if (singleton) {
       const instance = factory();
       this.dependencies.set(key, instance);
       
       // 如果是生命周期感知对象，注册到生命周期管理器
-      if (lifecycleAware && this.isLifecycleAware(instance)) {
+      if (lifecycleAware && this.isLifecycleAware(instance as object)) {
         this.lifecycleManager.register(key, instance as ILifecycleAware);
       }
     } else {
-      this.dependencies.set(key, factory);
+      this.dependencies.set(key, factory as () => object);
     }
   }
 
@@ -57,17 +57,17 @@ export class DependencyContainer {
    * @param key 依赖项的键
    * @returns T 依赖项实例
    */
-  public get<T>(key: string): T {
+  public get<T extends object>(key: string): T {
     const dependency = this.dependencies.get(key);
     if (typeof dependency === 'function') {
-      const instance = dependency();
+      const instance = (dependency as () => object)();
       // 如果是生命周期感知对象，注册到生命周期管理器
       if (this.isLifecycleAware(instance)) {
         this.lifecycleManager.register(key, instance as ILifecycleAware);
       }
-      return instance;
+      return instance as T;
     }
-    return dependency;
+    return dependency as T;
   }
 
   /**
@@ -106,26 +106,33 @@ export class DependencyContainer {
   public getLifecycleManager(): LifecycleManager {
     return this.lifecycleManager;
   }
-
   /**
    * 检查对象是否为生命周期感知对象
    * @param obj 要检查的对象
    * @returns boolean 是否为生命周期感知对象
    */
-  private isLifecycleAware(obj: any): boolean {
-    return obj && 
-      typeof obj.onCreate === 'function' &&
-      typeof obj.onStart === 'function' &&
-      typeof obj.onResume === 'function' &&
-      typeof obj.onPause === 'function' &&
-      typeof obj.onStop === 'function' &&
-      typeof obj.onDestroy === 'function';
+  private isLifecycleAware(obj: object): boolean {
+    const lifecycleObj = obj as ILifecycleAware;
+    return obj !== null && typeof obj === 'object' &&
+      typeof lifecycleObj.onCreate === 'function' &&
+      typeof lifecycleObj.onStart === 'function' &&
+      typeof lifecycleObj.onResume === 'function' &&
+      typeof lifecycleObj.onPause === 'function' &&
+      typeof lifecycleObj.onStop === 'function' &&
+      typeof lifecycleObj.onDestroy === 'function';
   }
+}
+
+/**
+ * 依赖项键接口
+ */
+export interface DependencyKeysInterface {
+  CAPTURE_CACHE: string;
 }
 
 /**
  * 依赖项键常量
  */
-export const DependencyKeys = {
+export const DependencyKeys: DependencyKeysInterface = {
   CAPTURE_CACHE: 'CaptureCache',
 };

@@ -113,19 +113,20 @@ export class Compressor {
 
       if (markerCount > 0) {
         // 处理连续的有效瓦片
+        let processedCount = 0;
         for (let tidx = idx; tidx < idx + markerCount; tidx++) {
           if (tidx >= dirty.length) {
             break; // 防止越界
           }
-
-          // 读取瓦片值，用于判断瓦片类型
-          const value = unzipped.readShort();
 
           // 确保瓦片的位置和大小信息存在
           if (!xywhArray[tidx]) {
             hilog.error(DOMAIN, TAG, 'xywhArray[tidx] is undefined: tidx=%{public}d, array length=%{public}d', tidx, xywhArray.length);
             continue;
           }
+
+          // 读取瓦片值，用于判断瓦片类型
+          const value = unzipped.readShort();
 
           // 根据value值处理不同类型的瓦片
           if (value >= 0 && value < 256) {
@@ -142,9 +143,13 @@ export class Compressor {
             // 其他情况：value是负数，dataLength是其绝对值
             this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, value);
           }
+          processedCount++;
         }
         // 更新瓦片索引
-        idx += markerCount;
+        idx += processedCount;
+        if (idx >= dirty.length) {
+          break; // 所有瓦片处理完毕，退出循环
+        }
       } else {
         // 跳过瓦片：markerCount为负数，计算跳过的数量
         const skipCount = -markerCount + 1;

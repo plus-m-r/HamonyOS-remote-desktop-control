@@ -1,4 +1,5 @@
-import { ILifecycleManager, LifecycleState, LifecycleEvent, ILifecycleAware, LifecycleCallback } from './ILifecycleManager';
+
+import { ILifecycleManager, LifecycleState, LifecycleEvent, ILifecycleAware, LifecycleCallback, LifecycleEventData } from './ILifecycleManager';
 
 /**
  * 生命周期管理器实现
@@ -57,7 +58,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发创建事件
    * @param data 额外数据
    */
-  async create(data?: any): Promise<void> {
+  async create(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'create',
       timestamp: Date.now(),
@@ -72,7 +73,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发启动事件
    * @param data 额外数据
    */
-  async start(data?: any): Promise<void> {
+  async start(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'start',
       timestamp: Date.now(),
@@ -87,7 +88,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发恢复事件
    * @param data 额外数据
    */
-  async resume(data?: any): Promise<void> {
+  async resume(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'resume',
       timestamp: Date.now(),
@@ -102,7 +103,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发暂停事件
    * @param data 额外数据
    */
-  async pause(data?: any): Promise<void> {
+  async pause(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'pause',
       timestamp: Date.now(),
@@ -117,7 +118,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发停止事件
    * @param data 额外数据
    */
-  async stop(data?: any): Promise<void> {
+  async stop(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'stop',
       timestamp: Date.now(),
@@ -132,7 +133,7 @@ export class LifecycleManager implements ILifecycleManager {
    * 触发销毁事件
    * @param data 额外数据
    */
-  async destroy(data?: any): Promise<void> {
+  async destroy(data?: LifecycleEventData): Promise<void> {
     const event: LifecycleEvent = {
       type: 'destroy',
       timestamp: Date.now(),
@@ -193,7 +194,10 @@ export class LifecycleManager implements ILifecycleManager {
    */
   private async triggerEvent(event: LifecycleEvent, action: (target: ILifecycleAware) => void | Promise<void>): Promise<void> {
     // 触发所有注册对象的生命周期方法
-    for (const [name, target] of this.registeredObjects) {
+    const registeredEntries = Array.from(this.registeredObjects.entries());
+    for (let i = 0; i < registeredEntries.length; i++) {
+      const name = registeredEntries[i][0];
+      const target = registeredEntries[i][1];
       try {
         const result = action(target);
         if (result instanceof Promise) {
@@ -205,7 +209,10 @@ export class LifecycleManager implements ILifecycleManager {
     }
     
     // 触发所有回调
-    for (const [id, callback] of this.callbacks) {
+    const callbackEntries = Array.from(this.callbacks.entries());
+    for (let i = 0; i < callbackEntries.length; i++) {
+      const id = callbackEntries[i][0];
+      const callback = callbackEntries[i][1];
       try {
         const result = callback(event);
         if (result instanceof Promise) {

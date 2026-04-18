@@ -18,6 +18,21 @@ export enum LifecycleState {
   STOPPED = 'STOPPED',
   DESTROYED = 'DESTROYED'
 }
+/**
+ * 事件数据项
+ */
+export interface EventDataItem {
+  key: string;
+  value: string | number | boolean | null | undefined;
+}
+
+/**
+ * 生命周期事件数据
+ */
+export interface LifecycleEventData {
+  /** 事件数据键值对 */
+  data?: Array<EventDataItem>;
+}
 
 /**
  * 生命周期事件
@@ -28,7 +43,7 @@ export interface LifecycleEvent {
   /** 时间戳 */
   timestamp: number;
   /** 额外数据 */
-  data?: any;
+  data?: LifecycleEventData;
 }
 
 /**
@@ -92,42 +107,36 @@ export interface ILifecycleManager {
    * @param name 对象名称
    */
   unregister(name: string): void;
-
   /**
    * 触发创建事件
    * @param data 额外数据
    */
-  create(data?: any): Promise<void>;
-
+  create(data?: LifecycleEventData): Promise<void>;
   /**
    * 触发启动事件
    * @param data 额外数据
    */
-  start(data?: any): Promise<void>;
-
+  start(data?: LifecycleEventData): Promise<void>;
   /**
    * 触发恢复事件
    * @param data 额外数据
    */
-  resume(data?: any): Promise<void>;
-
+  resume(data?: LifecycleEventData): Promise<void>;
   /**
    * 触发暂停事件
    * @param data 额外数据
    */
-  pause(data?: any): Promise<void>;
-
+  pause(data?: LifecycleEventData): Promise<void>;
   /**
    * 触发停止事件
    * @param data 额外数据
    */
-  stop(data?: any): Promise<void>;
-
+  stop(data?: LifecycleEventData): Promise<void>;
   /**
    * 触发销毁事件
    * @param data 额外数据
    */
-  destroy(data?: any): Promise<void>;
+  destroy(data?: LifecycleEventData): Promise<void>;
 
   /**
    * 获取当前生命周期状态

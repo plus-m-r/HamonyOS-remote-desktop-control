@@ -656,7 +656,7 @@ export class RemoteControlService implements IRemoteControlService {
       // 2. 准备图像缓冲区
       let imageBuffer: Uint8Array;
       const prevParams = this.captureProcessor.getPrevBufferParams();
-      const debugPos = zippedData.position;
+      const debugPos = zippedData.getReadOffset();
       
       // 保存第一帧的所有步骤数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {

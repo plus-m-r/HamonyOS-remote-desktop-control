@@ -77,7 +77,9 @@ export class ZstdZipper implements Zipper {
   private writeTempFile(filePath: string, data: Uint8Array): void {
     try {
       const file = fs.openSync(filePath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-      fs.writeSync(file.fd, data.buffer);
+      // 只写入实际的数据部分，而不是整个ArrayBuffer
+      const actualData = data.buffer.slice(data.byteOffset, data.byteOffset + data.length);
+      fs.writeSync(file.fd, actualData);
       fs.fsyncSync(file.fd); // 强制刷新到磁盘
       fs.closeSync(file);
     } catch (error) {

@@ -1,0 +1,267 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{ctex}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{setspace}
+\usepackage{pdfpages}
+
+% 页面设置
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% 代码风格设置
+\lstset{
+    language=Java,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    breaklines=true,
+    showstringspaces=false,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    backgroundcolor=\color{lightgray!20}
+}
+
+% 页眉页脚
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{计算机设计大赛}
+\fancyfoot[C]{\thepage}
+
+% 行距设置
+\onehalfspacing
+
+% ==================== 文档开始 ====================
+\begin{document}
+
+% 插入官方模板第一页
+\includepdf[pages=1]{template.pdf}
+
+% ==================== 目录 ====================
+\tableofcontents
+\newpage
+
+% ==================== 第一章 需求分析 ====================
+\section{第一章 需求分析}
+
+本项目为 HarmonyOS 远程桌面控制客户端，旨在为 HarmonyOS 设备提供稳定、低延迟的远程桌面访问与交互体验。客户端基于原生 HarmonyOS 页面与服务层设计，结合 TCP 和 HTTP 双通道协议，实现远程屏幕显示、触控控制、剪贴板同步和文件传输等功能。
+
+\subsection{项目背景}
+
+随着 HarmonyOS 生态的扩展，移动端用户对跨设备远程访问和远程协助的需求不断增长。本项目通过原生 HarmonyOS 客户端与远程服务器协作，解决远程桌面连接、屏幕渲染与交互响应等核心问题。
+
+\subsection{目标用户与功能定位}
+
+目标用户包括 HarmonyOS 终端用户、远程办公人员、运维工程师和远程协助场景用户。产品定位为轻量级远程控制工具，核心功能包括：
+\begin{itemize}
+    \item 远程屏幕实时显示与触控交互
+    \item 设备凭证输入与安全验证
+    \item 剪贴板同步与文件传输支持
+    \item 网络参数与同步策略可配置
+\end{itemize}
+
+\subsection{竞品分析}
+
+与传统远程桌面产品相比，本项目优势在于原生 HarmonyOS 适配、轻量化架构和更低的交互时延；与 Web 远程方案相比，本项目具备更好的触控响应与原生系统集成能力。
+\begin{itemize}
+    \item 原生 HarmonyOS MVVM 架构，提高可维护性与扩展性
+    \item TCP + HTTP 混合通信方案兼顾远程控制和文件传输稳定性
+    \item 配置中心与状态管理分离，增强会话恢复能力
+\end{itemize}
+
+% ==================== 第二章 概要设计 ====================
+\section{第二章 概要设计}
+
+客户端采用 MVVM 架构，页面层负责渲染与事件转发，业务逻辑由 ViewModel 和服务层承担。系统划分为页面层、ViewModel 层、服务层、网络层和配置/状态管理层。
+
+\subsection{总体设计}
+
+\begin{itemize}
+    \item 页面层：`Index.ets`、`Control.ets`、`Settings.ets` 等，负责用户输入、显示和交互。
+    \item ViewModel 层：封装页面状态、事件处理和服务调用，避免页面直接依赖业务逻辑。
+    \item 服务层：`RemoteControlService`、`ClipboardService`、`FileService` 等，提供远程控制、剪贴板和文件传输功能。
+    \item 网络层：TCP 连接处理远程控制与屏幕数据，HTTP 接口处理文件和剪贴板请求。
+    \item 配置与状态管理层：`ConfigCenter` 管理运行参数，`AppStateManager` 管理会话状态和持久化。
+\end{itemize}
+
+\subsection{模块结构}
+
+\begin{figure}[H]
+    \centering
+    \fbox{\parbox{12cm}{\vspace{3cm}
+    [模块结构图位置] \\\[3cm]
+    }}
+    \caption{系统模块结构图}
+\end{figure}
+
+模块关系为：页面层与 ViewModel 交互，ViewModel 调用服务层，服务层依赖网络层与配置/状态管理层。
+
+% ==================== 第三章 详细设计 ====================
+\section{第三章 详细设计}
+
+本章详细设计基于 HarmonyOS 客户端源码，涵盖页面设计、数据设计、关键技术与模块协作。
+
+\subsection{界面设计}
+
+HarmonyOS 客户端界面采用轻量化设计，主要页面包括：
+\begin{itemize}
+    \item 启动首页：输入设备 ID、密码，展示本机信息并启动连接。
+    \item 远程屏幕页面：显示远程画面，支持触控、拖拽、缩放和键盘输入。
+    \item 设置页面：配置文件传输、剪贴板同步、网络策略和日志展示入口。
+\end{itemize}
+
+典型使用流程为：用户输入凭证并启动连接，客户端验证通过后进入控制页面，远程画面数据经过 `TcpClient`、`ProtocolHandler`、`CaptureProcessor` 处理后显示。
+
+\subsection{数据库设计}
+
+本客户端不使用传统关系型数据库，数据设计以对象和键值存储为主，重点关注配置与运行状态。
+
+\begin{itemize}
+    \item `ConfigCenter`：存储服务端地址、端口、超时、重连策略、压缩参数、同步策略等系统配置。
+    \item `AppStateManager`：缓存用户凭证、连接状态、屏幕参数、剪贴板内容和同步设置。
+\end{itemize}
+
+该设计避免了数据库范式与事务开销，适合 HarmonyOS 轻量级客户端。
+
+\subsection{关键算法与关键技术}
+
+\paragraph{远程通信与重连}
+
+`TcpClient` 负责 TCP 长连接建立与维护，自动重连和心跳检测由 `ConnectionManager` 封装。业务层无需直接处理底层 socket 细节。
+
+\paragraph{协议解析与分发}
+
+`ProtocolHandler` 解析收到的网络数据，并按屏幕、剪贴板、文件、控制命令等类型分发处理，避免不同数据互相干扰。
+
+\paragraph{远程屏幕渲染}
+
+远程画面数据最终转换为 `PixelMap` 对象，UI 线程渲染。`ControlViewModel` 的 `createPixelMapOnMainThread` 确保渲染安全，避免线程冲突。
+
+\paragraph{模块解耦与可测试性}
+
+通过 `IRemoteControlService`、`IClipboardService`、`IFileService`、`ITcpRepository`、`IHttpRepository` 等接口实现依赖注入，页面层与业务层、网络层解耦，便于 Mock 测试。
+
+% ==================== 第四章 测试报告 ====================
+\section{第四章 测试报告}
+
+本项目测试策略以单元测试为主，覆盖核心业务逻辑，并结合集成测试验证模块间交互，UI 与设备相关功能通过模拟器或真机验证。
+
+\subsection{测试方法}
+
+\begin{itemize}
+    \item 单元测试：覆盖 `RemoteControlService`、`ClipboardService`、`FileService` 等关键模块。
+    \item 集成测试：验证网络层、协议解析和服务层的协作。
+    \item 系统测试：通过模拟器与真机测试远程连接、屏幕显示、触控交互和剪贴板同步。
+    \item 性能测试：评估画面帧率、重连稳定性、文件传输效率和资源使用情况。
+\end{itemize}
+
+\subsection{测试结果}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|p{5cm}|p{5cm}|c|}
+    \hline
+    \textbf{测试项目} & \textbf{期望结果} & \textbf{实际结果} & \textbf{状态} \\
+    \hline
+    远程连接稳定性 & 成功建立 TCP 连接并保持会话 & 重连与心跳机制正常工作 & 通过 \\
+    \hline
+    屏幕显示与交互 & 画面稳定显示、触控响应准确 & `PixelMap` 渲染正常、触控命令有效 & 通过 \\
+    \hline
+    文件与剪贴板同步 & HTTP 接口可用、剪贴板同步准确 & 文件传输与剪贴板同步正常 & 通过 \\
+    \hline
+    配置与状态管理 & 配置持久化、状态恢复正常 & `ConfigCenter` 和 `AppStateManager` 工作正常 & 通过 \\
+    \hline
+    \end{tabular}
+    \caption{测试结果汇总}
+\end{table}
+
+% ==================== 第五章 安装及使用 ====================
+\section{第五章 安装及使用}
+
+本章说明 HarmonyOS 客户端的构建环境、安装步骤和典型使用流程。
+
+\subsection{安装环境要求}
+
+\begin{itemize}
+    \item 操作系统：Windows / Linux / macOS
+    \item HarmonyOS SDK：兼容当前项目版本
+    \item 构建工具：`hvigor`、`ohos` 模块管理工具
+    \item Java JDK：匹配 `client` / `server` 模块的版本
+    \item 端口要求：HTTP 和 TCP 端口可用，建议 `12345` 和 `54321` 可达
+\end{itemize}
+
+\subsection{安装步骤}
+
+\begin{enumerate}
+    \item 检查项目配置文件：`oh-package.json5`、`build-profile.json5`、`hvigorfile.ts`。
+    \item 运行 `build_with_env.bat assembleHap` 构建 HarmonyOS 客户端应用。
+    \item 对 Java 模块执行 `mvn clean install` 或 `mvn clean package`。
+    \item 启动服务端应用，确保服务端监听地址与客户端配置一致。
+    \item 在模拟器或真机上安装构建生成的 HAP 包。
+\end{enumerate}
+
+\subsection{使用流程}
+
+\begin{enumerate}
+    \item 启动应用，输入目标设备 ID 和密码。
+    \item 进行设备验证并连接服务器。
+    \item 进入远程屏幕页面，进行触控、拖拽、缩放和键盘控制。
+    \item 在设置页面调整文件传输、剪贴板同步和网络策略。
+    \item 遇到网络问题时，可使用 localhost、模拟器特殊地址或主机 IP 进行调试。
+\end{enumerate}
+
+% ==================== 第六章 项目总结 ====================
+\section{第六章 项目总结}
+
+本项目实现了 HarmonyOS 原生远程桌面控制客户端，采用 MVVM 与服务层解耦设计，强调通信稳定性、可测试性和配置管理能力。
+
+\subsection{项目总结}
+
+\begin{itemize}
+    \item 设计并实现了基于 TCP 的远程控制链路与基于 HTTP 的文件/剪贴板接口。
+    \item 采用 `ConfigCenter` 与 `AppStateManager` 的配置与状态管理方案，提高环境适配与会话恢复能力。
+    \item 页面层与业务层解耦，支持 Mock 测试与后续功能拓展。
+\end{itemize}
+
+\subsection{存在的不足}
+
+\begin{itemize}
+    \item 当前文档缺少实际界面流程图与通信流程图，需要补充可视化说明。
+    \item 文件传输与日志展示功能仍需进一步完善，尤其是大文件分片和进度展示。
+    \item 兼容性测试应覆盖更多 HarmonyOS 设备和模拟器类型。
+\end{itemize}
+
+\subsection{未来工作展望}
+
+\begin{enumerate}
+    \item 补充页面流程图、配置关系图与关键通信架构图。
+    \item 扩展自动化测试覆盖范围，完善测试流水线。
+    \item 增强远程会议式控制、多屏适配和高效画面压缩策略。
+\end{enumerate}
+
+% ==================== 参考文献 ====================
+\section*{参考文献}
+\addcontentsline{toc}{section}{参考文献}
+
+\textbf{【请按照标准参考文件格式填写】}
+
+\begin{thebibliography}{99}
+
+\bibitem{ref1} 作者, 书名, 出版社, 年份
+
+\bibitem{ref2} 作者, 文章题名, 期刊名称, 卷号, 期号, 年份
+
+\bibitem{ref3} 作者, 网站名称, 访问日期: \url{http://www.example.com}
+
+\end{thebibliography}
+
+\end{document}
