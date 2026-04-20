@@ -1,5 +1,6 @@
 \documentclass[UTF8]{ctexart}
 \usepackage{geometry}
+\usepackage{amsmath,amssymb}
 \usepackage{pdfpages}
 \usepackage{titlesec}
 \usepackage{graphicx}
@@ -73,6 +74,8 @@
 \includegraphics[width=0.92\textwidth]{../reference/picture/HarmonyOS组件架构图.png}
 \caption{HarmonyOS组件架构图}
 \end{figure}
+如图所示，HarmonyOS客户端采用分层架构设计，自上而下分为UI层、业务逻辑层、服务层和基础设施层。UI层基于ArkUI框架构建，负责界面渲染和用户交互事件捕获；业务逻辑层实现坐标映射、状态管理和图像数据处理等核心功能；服务层通过IRemoteControlService接口封装网络连接、协议编解码和数据解压等底层细节；基础设施层提供连接管理、协议处理和工作线程池等支撑能力。各层之间通过清晰的接口进行通信，实现关注点分离和高内聚低耦合的设计目标。
+
 
 \begin{figure}[h]
 \centering
@@ -80,14 +83,20 @@
 \caption{Java端组件关系图}
 \end{figure}
 
+该图展示了 Java 服务端与 HarmonyOS 控制端之间的整体协作关系。服务端侧由应用启动层、网络通信层、协议处理层、连接管理模块和业务功能层组成，其中 Netty Pipeline 负责消息收发与协议编解码，CmdDispatcher 负责将控制命令分发到对应业务模块，OSBridge 层负责对接 Robot、Capture 和系统能力；控制端则通过 ConnectionManager、ProtocolHandler 和 RemoteControlService 完成连接管理、协议解析和视频数据处理。该结构使服务端接收、分发与执行链路保持清晰，也便于客户端在触控、屏幕显示和辅助功能上进行统一对接。
+
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{../reference/picture/端到端数据流.png}
 \caption{端到端数据流}
 \end{figure}
 
+该图进一步说明了系统端到端的数据流转过程。屏幕流从被控端 Capture 生成开始，经过分块、变化检测和 RLE+ZSTD 压缩后，通过 TCP 发送到控制端，再由解压、绘制和 UI 显示完成远程画面的重建；控制流则从客户端 UI 触发，经过坐标映射、指令组装和 TCP 发送，由被控端接收后调用 Robot API 执行；同时，剪贴板流和文件流分别通过服务端转发和 HTTP 通道处理，实现了画面传输、输入控制、剪贴板同步与文件传输的统一协作。该设计体现了各数据通道相互独立又统一调度的特点，有利于提升传输效率和模块解耦程度。
+
 \section{第三章\quad 详细设计}
 本章围绕客户端交互入口、图像采集与编码链路、网络异步处理机制以及压缩策略展开详细设计，重点说明关键模块如何在保证画面质量的同时降低带宽占用并提升链路稳定性。
+
+\subsection{界面设计}
 
 \begin{figure}[h]
 \centering
@@ -95,23 +104,36 @@
 \caption{进入界面图}
 \end{figure}
 
+该图展示了客户端的进入界面，整体采用左右分栏的卡片式布局。左侧用于展示本机设备信息，包括设备ID、连接密码和远程控制权限，并提供一键复制入口，方便用户将本机信息快速发送给对方；右侧则用于连接其他设备，用户只需输入目标设备ID和连接密码即可发起远程连接。界面顶部保留标题区，底部通过简洁的操作按钮突出最常用的两个任务，即“被控端信息展示”和“主动连接其他设备”，从而降低首次使用门槛并提高连接效率。
+
+\subsection{屏幕捕获与增量更新算法}
+
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{../reference/picture/屏幕捕获与增量更新算法图.png}
 \caption{屏幕捕获与增量更新算法图}
 \end{figure}
 
+如图所示，屏幕捕获与增量更新算法采用分块捕获策略，将屏幕划分为固定大小的 tile，tile 尺寸由配置项控制，默认值为 $64\times64$ 像素。具体而言，给定屏幕尺寸 $(W_r,H_r)$ 和 tile 尺寸 $(W_t,H_t)$，首先计算网格维度 $x=\lceil W_r/W_t\rceil$、$y=\lceil H_r/H_t\rceil$，得到总 tile 数 $N_{total}=x\times y$。对于第 $k\in[0,N_{total}-1]$ 个 tile，其行列索引为 $i=\lfloor k/x\rfloor$、$j=k\bmod x$，左上角坐标为 $(x_{pos}^{(k)},y_{pos}^{(k)})=(j\cdot W_t,i\cdot H_t)$，实际尺寸为 $(w_{tile}^{(k)},h_{tile}^{(k)})=(\min(W_r-x_{pos}^{(k)},W_t),\min(H_r-y_{pos}^{(k)},H_t))$。每个 tile 独立捕获和处理，并通过 Adler32 校验和进行变化检测：计算当前帧校验和 $CS_{current}^{(k)}=Adler32(data_{tile}^{(k)})$ 并与上一帧 $CS_{previous}^{(k)}$ 比较，若不相等则标记为 dirty tile。所有 dirty tile 构成集合 $D=\{k\mid isDirty(k)=true,\,k\in[0,N_{total}-1]\}$，数量为 $N_{dirty}=|D|$。原始数据大小可表示为 $S_{raw}=\sum_{k\in D}(w_{tile}^{(k)}\cdot h_{tile}^{(k)}\cdot p)$（其中 $p$ 为每像素字节数，灰度图 $p=1$，彩色图 $p=4$），这与代码中按 dirty tile 统计有效载荷字节数的方式一致；经压缩后大小为 $S_{compressed}$，压缩比为 $\rho=S_{raw}/S_{compressed}$。该算法仅传输发生变化的 $N_{dirty}$ 个 tile 而非完整屏幕，带宽节省率可写为 $\eta=1-N_{dirty}/N_{total}$。在静态或低动态场景下，$N_{dirty}\ll N_{total}$，因此传输量会显著下降，结合 RLE+ZSTD 两级压缩可进一步降低网络负载，实现高效增量更新机制。
+
+\subsection{异步处理与背压控制机制}
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{../reference/picture/异步处理与背压控制图.png}
 \caption{异步处理与背压控制图}
 \end{figure}
 
+如图所示，异步处理与背压控制机制以“任务队列 + 线程池 + 网络反馈”为主线展开。系统将远端数据输入拆分为捕获任务、控制任务和高优先级事件三类，其中鼠标等交互事件被赋予更高优先级，优先进入处理队列；普通捕获任务则按顺序排队，由线程池异步执行。设任务到达速率为 $\lambda$，处理速率为 $\mu$，队列长度为 $Q(t)$，队列上限为 $Q_{max}$，则当 $Q(t)/Q_{max}$ 超过阈值 $\phi_{high}$，或者网络状态监测结果表明链路拥塞时，系统触发背压控制，降低捕获频率或延后低优先级任务的执行；当 $Q(t)/Q_{max}$ 回落到阈值 $\phi_{low}$ 以下时，再逐步恢复正常处理速度。该机制与代码中的 `dataQueue`、`isProcessingData`、`maxDataQueueSize`、`captureWorkerCount`、`protocolWorkerCount` 以及心跳/重连策略相配合，使网络状态、队列积压和线程资源能够统一调度，从而避免任务堆积和界面卡顿。与此同时，动态重配置模块会根据运行态参数调整压缩配置和缓存策略，`TileCache` 也会在重置或参数变化时重建，保证处理链路在高负载条件下仍然保持稳定。该设计体现了“先保障交互，再平衡吞吐”的原则，适合远程控制这类对实时性敏感的场景。
+
+\subsection{RLE+ZSTD三级压缩策略}
+
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.92\textwidth]{../reference/picture/RLE + ZSTD 压缩算法.png}
 \caption{RLE + ZSTD 压缩算法}
 \end{figure}
+
+如图所示，系统采用三级压缩策略对 tile 数据进行逐层优化。设第 $k$ 个 tile 的像素矩阵为 $T^{(k)}\in\mathbb{R}^{h\times w}$（其中 $h$ 和 $w$ 分别表示 tile 的高度和宽度）。第一级为单色检测与优化：先判断当前 tile 是否为单色 tile，即 $isSingleLevel^{(k)}=true$ 且 $\forall i,j:T^{(k)}_{i,j}=c\,(c\in[0,255])$；若为单色，则编码为 $E_{1}^{(k)}=(type=single,value=c)$，此时数据大小仅为 1 字节，否则保留原始像素序列，数据大小为 $h\cdot w\cdot p$ 字节，其中 $p$ 为每像素字节数，灰度图 $p=1$、彩色图 $p=4$。第二级为 RLE 游程编码：对非单色 tile 的像素序列 $T^{(k)}_{i,j}$ 进行游程压缩，得到序列 $E_{2}^{(k)}=\{(v_{1},c_{1}),(v_{2},c_{2}),\ldots,(v_{m},c_{m})\}$，其中 $v_{l}\in[0,255]$ 表示像素值，$c_{l}\in\mathbb{N}^{+}$ 表示连续重复次数，且满足 $\sum_{l=1}^{m}c_{l}=h\cdot w$；该阶段的数据大小为 $S_{2}^{(k)}=2m$ 字节（假设每个 $(v,c)$ 对占 2 字节）。第三级为 ZSTD 压缩：将 RLE 编码后的数据进一步压缩，得到 $E_{3}^{(k)}=ZSTD\_Compress(E_{2}^{(k)},level)$，其中 $level$ 为压缩级别，默认值为 3，压缩后大小为 $S_{3}^{(k)}=|E_{3}^{(k)}|$ 字节。综合而言，对于第 $k$ 个 tile，最终编码结果为：若为单色 tile，则 $E^{(k)}=(marker=c)$；否则 $E^{(k)}=ZSTD\_Compress(RLE(T^{(k)}))$。所有 dirty tile 的总压缩数据为 $S_{compressed}=\sum_{k\in D}|E^{(k)}|+S_{metadata}$，其中 $S_{metadata}$ 为元数据开销，包含 frame ID、尺寸信息等；原始数据大小为 $S_{raw}=N_{dirty}\cdot h\cdot w\cdot p$（$D$ 为 dirty tile 集合，$N_{dirty}=|D|$ 为变化 tile 数量），压缩比为 $\rho=S_{raw}/S_{compressed}$，带宽节省率为 $\eta=1-1/\rho=1-S_{compressed}/S_{raw}$。三级压缩策略通过层层递进的优化，先在单色检测阶段消除冗余存储，再在 RLE 编码阶段利用空间局部性减少数据量，最后由 ZSTD 实现通用压缩，三者协同工作可获得较高的压缩比，并显著降低网络传输负载。
 
 \section{第四章\quad 测试报告}
 请在本章描述测试方案、测试过程与测试结果。
