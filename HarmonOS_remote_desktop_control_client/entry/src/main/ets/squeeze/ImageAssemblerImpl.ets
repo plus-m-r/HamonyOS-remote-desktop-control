@@ -18,7 +18,7 @@ export class ImageAssemblerImpl implements IImageAssembler {
   init(config: AssemblerConfig): void {
     this.config = config;
     this.isInitialized = true;
-    console.info('ImageAssemblerImpl: Initialized');
+    console.debug('ImageAssemblerImpl: Initialized');
   }
 
   async assemble(
@@ -76,8 +76,16 @@ export class ImageAssemblerImpl implements IImageAssembler {
 
     } catch (error) {
       console.error('ImageAssemblerImpl: Assemble failed', error);
-      throw error;
+      throw new Error(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  hasReusableBuffer(width: number, height: number): boolean {
+    return this.config !== null &&
+      this.config.enableBufferReuse &&
+      this.prevBuffer !== null &&
+      this.prevWidth === width &&
+      this.prevHeight === height;
   }
 
   getAverageAssembleTime(): number {
@@ -98,7 +106,7 @@ export class ImageAssemblerImpl implements IImageAssembler {
     this.prevBuffer = null;
     this.prevWidth = 0;
     this.prevHeight = 0;
-    console.info('ImageAssemblerImpl: Reset');
+    console.debug('ImageAssemblerImpl: Reset');
   }
 
   destroy(): void {
@@ -108,7 +116,7 @@ export class ImageAssemblerImpl implements IImageAssembler {
     this.prevHeight = 0;
     this.config = null;
     this.isInitialized = false;
-    console.info('ImageAssemblerImpl: Destroyed');
+    console.debug('ImageAssemblerImpl: Destroyed');
   }
 
   private recordAssembleTime(time: number): void {

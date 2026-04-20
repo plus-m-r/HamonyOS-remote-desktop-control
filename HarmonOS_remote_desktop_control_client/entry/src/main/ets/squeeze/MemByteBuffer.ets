@@ -97,7 +97,7 @@ export class MemByteBuffer {
     const result = (b1 << 8) | b2;
     // 将无符号 16 位整数转换为有符号 16 位整数
     const signedResult = result > 32767 ? result - 65536 : result;
-    hilog.error(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, unsigned=%{public}d, signed=%{public}d', 
+    hilog.debug(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, unsigned=%{public}d, signed=%{public}d', 
       b1.toString(16), b2.toString(16), result, signedResult);
     return signedResult;
   }
@@ -124,7 +124,7 @@ export class MemByteBuffer {
   }
 
   readBytes(length: number): Uint8Array {
-    hilog.error(DOMAIN, TAG, 'readBytes requested: %{public}d, available: %{public}d', length, this.writeOffset - this.readOffset);
+    hilog.debug(DOMAIN, TAG, 'readBytes requested: %{public}d, available: %{public}d', length, this.writeOffset - this.readOffset);
     if (this.readOffset + length > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
@@ -140,7 +140,7 @@ export class MemByteBuffer {
   readBytesBestEffort(length: number): Uint8Array {
     const available = this.writeOffset - this.readOffset;
     const toRead = Math.min(available, length);
-    hilog.error(DOMAIN, TAG, 'readBytesBestEffort requested: %{public}d, available: %{public}d, toRead: %{public}d', length, available, toRead);
+    hilog.debug(DOMAIN, TAG, 'readBytesBestEffort requested: %{public}d, available: %{public}d, toRead: %{public}d', length, available, toRead);
     const result = this.buffer.subarray(this.readOffset, this.readOffset + toRead);
     this.readOffset += toRead;
     return result;

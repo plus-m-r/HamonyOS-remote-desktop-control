@@ -1301,8 +1301,13 @@ export class CmdCodec {
         console.error('CmdCodec: Capture payload length incomplete');
         return undefined;
       }
-      const payloadLength = view.getInt32(offset, false);
+      const payloadLength = view.getUint32(offset, false);
       offset += 4;
+
+      if (payloadLength === 0) {
+        console.error('CmdCodec: Capture payload length is zero');
+        return undefined;
+      }
 
       // 检查数据长度
       if (dataBuffer.byteLength < offset + payloadLength) {

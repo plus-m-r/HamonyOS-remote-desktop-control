@@ -113,8 +113,8 @@ export class Compressor {
     const tileHeight = unzipped.readShort(); // 瓦片高度
     
     // 打印尺寸信息，用于调试
-    hilog.error(DOMAIN, TAG, 'captureWidth=%{public}d, captureHeight=%{public}d, tileWidth=%{public}d, tileHeight=%{public}d', captureWidth, captureHeight, tileWidth, tileHeight);
-    hilog.error(DOMAIN, TAG, 'Read at offset=%{public}d', debugPos);
+    hilog.debug(DOMAIN, TAG, 'captureWidth=%{public}d, captureHeight=%{public}d, tileWidth=%{public}d, tileHeight=%{public}d', captureWidth, captureHeight, tileWidth, tileHeight);
+    hilog.debug(DOMAIN, TAG, 'Read at offset=%{public}d', debugPos);
 
     // 4. 计算所有瓦片的位置和大小（使用缓存优化）
     let xywhArray: XYWH[];
@@ -154,7 +154,7 @@ export class Compressor {
 
           // 确保瓦片的位置和大小信息存在
           if (!xywhArray[tidx]) {
-            hilog.error(DOMAIN, TAG, 'xywhArray[tidx] is undefined: tidx=%{public}d, array length=%{public}d', tidx, xywhArray.length);
+            hilog.warn(DOMAIN, TAG, 'xywhArray[tidx] is undefined: tidx=%{public}d, array length=%{public}d', tidx, xywhArray.length);
             continue;
           }
 

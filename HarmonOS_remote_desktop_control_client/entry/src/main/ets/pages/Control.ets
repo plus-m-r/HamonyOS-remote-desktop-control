@@ -107,7 +107,15 @@ struct Control {
 
       // 设置屏幕像素数据回调
       this.viewModel.setScreenPixelMapCallback((pixelMap: image.PixelMap) => {
+        const previous = this.screenPixelMap;
         this.screenPixelMap = pixelMap;  // 触发 UI 刷新
+        if (previous && previous !== pixelMap) {
+          try {
+            previous.release();
+          } catch (error) {
+            hilog.warn(DOMAIN, TAG, '释放旧PixelMap失败: %{public}s', JSON.stringify(error));
+          }
+        }
       });
 
       // 设置 UIContext 用于主线程渲染
@@ -123,6 +131,14 @@ struct Control {
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Control页面销毁');
     this.viewModel.dispose();
+    if (this.screenPixelMap) {
+      try {
+        this.screenPixelMap.release();
+      } catch (error) {
+        hilog.warn(DOMAIN, TAG, '页面销毁释放PixelMap失败: %{public}s', JSON.stringify(error));
+      }
+      this.screenPixelMap = null;
+    }
   }
 
   private showToast(message: string, duration: number = 2000): void {

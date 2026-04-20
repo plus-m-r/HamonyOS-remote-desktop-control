@@ -42,16 +42,14 @@ import { Compressor, CompressionMethod } from '../../squeeze/Compressor';
 
 import { Capture } from '../../squeeze/Capture';
 import { CaptureCache } from '../../squeeze/CaptureCache';
+import { ImageAssemblerImpl } from '../../squeeze/ImageAssemblerImpl';
 import { ChecksumUtils } from '../../utils/ChecksumUtils';
 import { DependencyContainer, DependencyKeys } from '../../utils/DependencyContainer';
-import { DataSamplingUtil } from './DataSamplingUtil';
 import hilog from '@ohos.hilog';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import common from '@ohos.app.ability.common';
 import { GlobalContext } from '../../utils/GlobalContext';
-import { UIContext } from '@kit.ArkUI';
-import { image } from '@kit.ImageKit';
 
 const DOMAIN: number = 0xFF00;
 const TAG: string = 'RemoteControlService';
@@ -89,6 +87,7 @@ export class RemoteControlService implements IRemoteControlService {
 
   // 帧处理器
   private captureProcessor: CaptureProcessor = new CaptureProcessor();
+  private imageAssembler: ImageAssemblerImpl = new ImageAssemblerImpl();
 
   // Capture 缓存（用于存储处理后的Capture对象）
   private captureCache: CaptureCache;
@@ -108,6 +107,8 @@ export class RemoteControlService implements IRemoteControlService {
   // 数据处理队列，确保按顺序处理
   private dataQueue: ArrayBuffer[] = [];
   private isProcessingData: boolean = false;
+  private readonly maxDataQueueSize: number = 32;
+  private droppedDataQueueCount: number = 0;
 
   // 设备信息
   private localDeviceCode: string = '';
@@ -146,6 +147,10 @@ export class RemoteControlService implements IRemoteControlService {
 
     // 使用依赖注入获取CaptureCache实例
     this.captureCache = DependencyContainer.getInstance().get<CaptureCache>(DependencyKeys.CAPTURE_CACHE);
+    this.imageAssembler.init({
+      maxBufferSize: 64 * 1024 * 1024,
+      enableBufferReuse: true
+    });
 
     this.setupCallbacks();
     hilog.info(DOMAIN, TAG, 'RemoteControlService initialized');
@@ -200,6 +205,16 @@ export class RemoteControlService implements IRemoteControlService {
    */
   private async handleReceivedData(data: ArrayBuffer): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', data.byteLength);
+
+    // 接收侧背压：latest-wins，队列超限时丢弃最旧数据包，避免内存持续膨胀
+    while (this.dataQueue.length >= this.maxDataQueueSize) {
+      this.dataQueue.shift();
+      this.droppedDataQueueCount++;
+    }
+
+    if (this.droppedDataQueueCount > 0 && this.droppedDataQueueCount % 20 === 0) {
+      hilog.warn(DOMAIN, TAG, 'Data queue backpressure active, dropped packets: %{public}d', this.droppedDataQueueCount);
+    }
     
     // 将数据加入队列
     this.dataQueue.push(data);
@@ -266,6 +281,9 @@ export class RemoteControlService implements IRemoteControlService {
   async disconnect(): Promise<void> {
     this.stopHeartbeat();
     this.captureProcessor.reset();
+    this.imageAssembler.reset();
+    this.dataQueue = [];
+    this.isProcessingData = false;
     await this.connectionManager.disconnect();
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
@@ -301,6 +319,9 @@ export class RemoteControlService implements IRemoteControlService {
     this.remoteDeviceCode = '';
     this.remotePassword = '';
     this.captureProcessor.reset();
+    this.imageAssembler.reset();
+    this.dataQueue = [];
+    this.isProcessingData = false;
     hilog.info(DOMAIN, TAG, 'Remote screen closed');
   }
 
@@ -424,6 +445,7 @@ export class RemoteControlService implements IRemoteControlService {
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
     this.captureProcessor.reset();
+    this.imageAssembler.destroy();
     this.captureCache.clear();
     hilog.info(DOMAIN, TAG, 'Service cleaned up');
   }
@@ -490,6 +512,7 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.info(DOMAIN, TAG, 'Remote screen capture started');
       this.videoConfig.enabled = true;
       this.captureProcessor.reset();
+      this.imageAssembler.reset();
       this.captureCache.clear();
       // TileCache 将通过 CompressorConfig 命令配置
       hilog.info(DOMAIN, TAG, 'Waiting for CompressorConfig to set up tile cache');
@@ -557,11 +580,11 @@ export class RemoteControlService implements IRemoteControlService {
     // 处理压缩配置（效仿 Java 端 DeCompressorEngine）
     if (compressionConfig) {
       const method = compressionConfig.method || 3;
-      
-      hilog.info(DOMAIN, TAG, 'Capture compression config applied - method: %{public}d', method);
+
+      hilog.debug(DOMAIN, TAG, 'Capture compression config applied - method: %{public}d', method);
     }
 
-    hilog.info(DOMAIN, TAG, 'CmdCapture received - imageData size: %{public}d, compressionMethod: %{public}d, hasConfig: %{public}s',
+    hilog.debug(DOMAIN, TAG, 'CmdCapture received - imageData size: %{public}d, compressionMethod: %{public}d, hasConfig: %{public}s',
       typeof imageData === 'string' ? imageData.length : (imageData as ArrayBuffer).byteLength,
       compressionMethod,
       compressionConfig ? 'true' : 'false');
@@ -585,19 +608,75 @@ export class RemoteControlService implements IRemoteControlService {
    */
   private decodeImageData(imageData: string): ArrayBuffer {
     try {
-      // 检查是否是 base64 编码
-      if (imageData.length > 0) {
-        // 尝试直接解析为 ArrayBuffer
-        const bytes = new Uint8Array(imageData.length);
-        for (let i = 0; i < imageData.length; i++) {
-          bytes[i] = imageData.charCodeAt(i);
-        }
-        return bytes.buffer as ArrayBuffer;
+      if (imageData.length === 0) {
+        return new ArrayBuffer(0);
       }
+
+      let normalized = imageData.trim();
+
+      // 兼容 data URL：data:...;base64,xxxx
+      const dataUrlPrefix = 'base64,';
+      const prefixIndex = normalized.indexOf(dataUrlPrefix);
+      if (prefixIndex >= 0) {
+        normalized = normalized.substring(prefixIndex + dataUrlPrefix.length);
+      }
+
+      // 尝试按 base64 解码
+      const base64Body = normalized.replace(/\s+/g, '');
+      const isBase64Candidate = /^[A-Za-z0-9+/=]+$/.test(base64Body) && base64Body.length % 4 === 0;
+      if (isBase64Candidate) {
+        return this.decodeBase64ToArrayBuffer(base64Body);
+      }
+
+      // 退化到按原始字节字符串解析
+      const bytes = new Uint8Array(normalized.length);
+      for (let i = 0; i < normalized.length; i++) {
+        bytes[i] = normalized.charCodeAt(i) & 0xFF;
+      }
+      return bytes.buffer;
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to decode image data: %{public}s', JSON.stringify(error));
     }
     return new ArrayBuffer(0);
+  }
+
+  /**
+   * 将base64字符串解码为ArrayBuffer
+   */
+  private decodeBase64ToArrayBuffer(base64: string): ArrayBuffer {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const out: number[] = [];
+
+    for (let i = 0; i < base64.length; i += 4) {
+      const c0 = base64.charAt(i);
+      const c1 = base64.charAt(i + 1);
+      const c2 = base64.charAt(i + 2);
+      const c3 = base64.charAt(i + 3);
+
+      const n0 = chars.indexOf(c0);
+      const n1 = chars.indexOf(c1);
+      const n2 = c2 === '=' ? -1 : chars.indexOf(c2);
+      const n3 = c3 === '=' ? -1 : chars.indexOf(c3);
+
+      if (n0 < 0 || n1 < 0 || (n2 < 0 && c2 !== '=') || (n3 < 0 && c3 !== '=')) {
+        throw new Error('Invalid base64 content');
+      }
+
+      const b0 = (n0 << 2) | (n1 >> 4);
+      out.push(b0 & 0xFF);
+
+      if (c2 !== '=') {
+        const b1 = ((n1 & 0x0F) << 4) | (n2 >> 2);
+        out.push(b1 & 0xFF);
+      }
+
+      if (c3 !== '=') {
+        const b2 = ((n2 & 0x03) << 6) | n3;
+        out.push(b2 & 0xFF);
+      }
+    }
+
+    return new Uint8Array(out).buffer;
   }
 
   /**
@@ -651,19 +730,77 @@ export class RemoteControlService implements IRemoteControlService {
   private isFirstFrame: boolean = true; // 设置为 true 启用调试保存
   private saveDataCounter: number = 0;
   private readonly DEBUG_SAVE_FIRST_FRAME: boolean = false; // 控制是否保存第一帧数据
+  private skippedNoPreCaptureCount: number = 0;
+  private skippedIncompleteNoBufferCount: number = 0;
+  private consecutiveSkipCount: number = 0;
+  private readonly consecutiveSkipWarnThreshold: number = 120;
+  private renderedFrameCount: number = 0;
+
+  private recordSkip(reason: string, captureId: number): void {
+    this.consecutiveSkipCount++;
+
+    if (
+      this.consecutiveSkipCount === this.consecutiveSkipWarnThreshold ||
+      this.consecutiveSkipCount % this.consecutiveSkipWarnThreshold === 0
+    ) {
+      hilog.warn(
+        DOMAIN,
+        TAG,
+        'Consecutive skip reached %{public}d (reason=%{public}s, captureId=%{public}d, skippedNoPre=%{public}d, skippedNoBuffer=%{public}d, rendered=%{public}d)',
+        this.consecutiveSkipCount,
+        reason,
+        captureId,
+        this.skippedNoPreCaptureCount,
+        this.skippedIncompleteNoBufferCount,
+        this.renderedFrameCount
+      );
+    }
+  }
+
+  private resetConsecutiveSkipIfNeeded(width: number, height: number): void {
+    if (this.consecutiveSkipCount >= this.consecutiveSkipWarnThreshold) {
+      hilog.info(
+        DOMAIN,
+        TAG,
+        'Render recovered after consecutive skips: %{public}d (size=%{public}d x %{public}d)',
+        this.consecutiveSkipCount,
+        width,
+        height
+      );
+    }
+    this.consecutiveSkipCount = 0;
+  }
+
+  /**
+   * 根据待补全积压量自适应调整每轮补全处理数量
+   */
+  private getAdaptiveIncompleteBatchSize(): number {
+    const pending = this.captureCache.getPendingCaptureQueueSize();
+
+    if (pending <= 2) {
+      return 2;
+    }
+    if (pending <= 6) {
+      return 4;
+    }
+    if (pending <= 12) {
+      return 8;
+    }
+    return 12;
+  }
 
   private async onRawVideoData(
     data: ArrayBuffer,
     compressionMethod: number = 3,
     compressionConfig?: CompressionConfig
   ): Promise<void> {
-    hilog.info(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
+    hilog.debug(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
       data.byteLength, compressionMethod);
 
     try {
       // 计算接收到的数据的校验和，确保数据完整性
       const checksum = ChecksumUtils.computeAdler32FromBuffer(data);
-      hilog.info(DOMAIN, TAG, 'Received data checksum: %{public}d', checksum);
+      hilog.debug(DOMAIN, TAG, 'Received data checksum: %{public}d', checksum);
 
       // 处理所有帧
       const zippedData = MemByteBuffer.fromArray(new Uint8Array(data));
@@ -689,12 +826,12 @@ export class RemoteControlService implements IRemoteControlService {
       // 检查缓存中是否存在相同ID的Capture
       const cachedCapture = this.captureCache.get(capture.id);
       if (cachedCapture) {
-        hilog.info(DOMAIN, TAG, 'Capture cache hit for id: %{public}d', capture.id);
+        hilog.debug(DOMAIN, TAG, 'Capture cache hit for id: %{public}d', capture.id);
         capture = cachedCapture;
       } else {
         // 将新的Capture添加到缓存
         this.captureCache.add(capture);
-        hilog.info(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
+        hilog.debug(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
       }
       
       // 使用 preCapture 作为完整帧基线：增量帧只覆盖变化瓦片
@@ -720,20 +857,40 @@ export class RemoteControlService implements IRemoteControlService {
         this.captureCache.setPreCapture(currentCapture);
       }
 
-      const renderCapture = this.captureCache.getPreCapture() as Capture;
+      // 接入不完整帧补全逻辑，返回当前基线是否完整
+      const adaptiveBatch = this.getAdaptiveIncompleteBatchSize();
+      const isPreCaptureComplete = this.captureCache.processIncompleteCaptures(adaptiveBatch);
 
-      const captureWidth = renderCapture.width;
-      const captureHeight = renderCapture.height;
-      const tileWidth = renderCapture.tileWidth;
-      const tileHeight = renderCapture.tileHeight;
+      const renderCaptureCandidate = this.captureCache.getPreCapture();
+      if (!renderCaptureCandidate) {
+        this.skippedNoPreCaptureCount++;
+        this.recordSkip('no preCapture', currentCapture.id);
+        if (this.skippedNoPreCaptureCount <= 3 || this.skippedNoPreCaptureCount % 30 === 0) {
+          hilog.warn(DOMAIN, TAG,
+            'Skip render(no preCapture), count=%{public}d, captureId=%{public}d',
+            this.skippedNoPreCaptureCount, currentCapture.id);
+        }
+        return;
+      }
+      const renderCapture = renderCaptureCandidate as Capture;
+
+      const hasReusableBuffer = this.imageAssembler.hasReusableBuffer(renderCapture.width, renderCapture.height);
+      if (!isPreCaptureComplete && !hasReusableBuffer) {
+        this.skippedIncompleteNoBufferCount++;
+        this.recordSkip('incomplete+noBuffer', currentCapture.id);
+        if (this.skippedIncompleteNoBufferCount <= 3 || this.skippedIncompleteNoBufferCount % 30 === 0) {
+          hilog.warn(DOMAIN, TAG,
+            'Skip render(incomplete+noBuffer), count=%{public}d, captureId=%{public}d',
+            this.skippedIncompleteNoBufferCount, currentCapture.id);
+        }
+        return;
+      }
+
+      const assembleResult = await this.imageAssembler.assemble(renderCapture);
       const cId = currentCapture.id;
       const cReset = currentCapture.reset;
-      const bufferSize = captureWidth * captureHeight * 4;
-      
 
-      
-      // 2. 准备图像缓冲区（增量帧复用上一帧）
-      let imageBuffer: Uint8Array;
+      // 2. 处理帧前的 Capture 信息保存
       
       // 保存第一帧的所有步骤数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
@@ -746,8 +903,8 @@ export class RemoteControlService implements IRemoteControlService {
         const captureInfo: CaptureInfo = {
           id: currentCapture.id,
           reset: currentCapture.reset,
-          width: renderCapture.width,
-          height: renderCapture.height,
+          width: assembleResult.width,
+          height: assembleResult.height,
           tileWidth: renderCapture.tileWidth,
           tileHeight: renderCapture.tileHeight,
           dirtyTilesCount: renderCapture.dirtyTiles.filter((t) => t !== null).length
@@ -762,64 +919,21 @@ export class RemoteControlService implements IRemoteControlService {
         }
       }
 
-      // 3. 创建图像缓冲区并清为黑底，再由 preCapture 绘制完整画面
-      imageBuffer = new Uint8Array(bufferSize);
-      for (let i = 0; i < bufferSize; i += 4) {
-        imageBuffer[i] = 0x00; // B 通道：黑色
-        imageBuffer[i + 1] = 0x00; // G 通道：黑色
-        imageBuffer[i + 2] = 0x00; // R 通道：黑色
-        imageBuffer[i + 3] = 0xFF; // A 通道：完全不透明
-      }
-
-      // 8. 保存绘制前的缓冲区（步骤4）
+      // 3. 保存组装后的缓冲区（仅用于调试首帧）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
         const timestamp = Date.now();
-        await this.saveArrayBufferToFile(`data/step4_before_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
-      }
-
-      // 9. 将 preCapture 的完整瓦片绘制到缓冲区
-      renderCapture.drawToBuffer(imageBuffer);
-
-      // 保存第一帧的绘制后数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
-      if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
-        const timestamp = Date.now();
-        // 10. 保存绘制后的缓冲区（步骤5）
-        await this.saveArrayBufferToFile(`data/step5_after_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
-      }
-
-      // 数据采样：保存最终组装后的图像数据（第四层）
-      if (DataSamplingUtil.canSample()) {
-        // 使用capture.id作为采样ID
-        await DataSamplingUtil.saveFinalImageData(capture.id, imageBuffer, "after_draw");
-        
-        // 生成并保存元数据
-        const metadata = DataSamplingUtil.generateMetadata(
-          capture.id,
-          Date.now(),
-          data.byteLength,
-          zippedData.size(),
-          0, // RLE输入大小（在Compressor中采样）
-          0, // RLE输出大小（在Compressor中采样）
-          imageBuffer.length * 4, // 最终图像大小
-          CompressionMethod[compressionMethod],
-          captureWidth,
-          captureHeight,
-          tileWidth,
-          tileHeight,
-          renderCapture.dirtyTiles.filter((t) => t !== null).length
-        );
-        await DataSamplingUtil.saveMetadata(capture.id, metadata);
+        await this.saveArrayBufferToFile(`data/step5_after_draw_${timestamp}.raw`, assembleResult.pixelBuffer.buffer as ArrayBuffer);
       }
 
       // 4. 处理帧
       const frameInfo: FrameInfo = {
         id: cId,
         reset: cReset,
-        width: captureWidth,
-        height: captureHeight
+        width: assembleResult.width,
+        height: assembleResult.height
       };
 
-      const frameResult: CaptureFrameProcessResult = this.captureProcessor.processFrame(imageBuffer, frameInfo);
+      const frameResult: CaptureFrameProcessResult = this.captureProcessor.processFrame(assembleResult.pixelBuffer, frameInfo);
 
       // 保存第一帧的最终处理数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
@@ -838,10 +952,6 @@ export class RemoteControlService implements IRemoteControlService {
         const widthVal: number = frameResult.width;
         const heightVal: number = frameResult.height;
         
-        // 添加日志确认 screenCallback 被调用且数据正确
-        hilog.info(DOMAIN, TAG, 'Calling screenCallback with data: width=%{public}d, height=%{public}d, size=%{public}d bytes', 
-          widthVal, heightVal, bufferData.byteLength);
-        
         try {
           this.screenCallback(
             bufferData,
@@ -849,7 +959,17 @@ export class RemoteControlService implements IRemoteControlService {
             heightVal,
             Date.now()
           );
-          hilog.info(DOMAIN, TAG, 'screenCallback called successfully');
+          this.resetConsecutiveSkipIfNeeded(widthVal, heightVal);
+          this.renderedFrameCount++;
+          if (this.renderedFrameCount <= 3 || this.renderedFrameCount % 120 === 0) {
+            hilog.debug(DOMAIN, TAG,
+              'Render frame success, rendered=%{public}d, skippedNoPre=%{public}d, skippedNoBuffer=%{public}d, size=%{public}d x %{public}d',
+              this.renderedFrameCount,
+              this.skippedNoPreCaptureCount,
+              this.skippedIncompleteNoBufferCount,
+              widthVal,
+              heightVal);
+          }
         } catch (error) {
           hilog.error(DOMAIN, TAG, 'Error in screenCallback: %{public}s', error instanceof Error ? error.message : String(error));
         }

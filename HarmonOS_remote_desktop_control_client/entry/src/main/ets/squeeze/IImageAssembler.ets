@@ -61,6 +61,11 @@ export interface IImageAssembler {
   ): Promise<AssembleResult>;
 
   /**
+   * 判断当前组装器是否已经持有可复用的上一帧缓冲区
+   */
+  hasReusableBuffer(width: number, height: number): boolean;
+
+  /**
    * 获取组装耗时统计
    * @returns 平均组装耗时（毫秒）
    */
