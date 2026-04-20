@@ -45,3 +45,17 @@ MANIFEST.MF
 
 # Reference code directory
 reference_code/
+
+# --- Local sensitive/debug artifacts ---
+HarmonOS_remote_desktop_control_client/debug.cer
+HarmonOS_remote_desktop_control_client/debug_keystore.jks
+
+# --- Local generated files ---
+client/cp.txt
+data/
+flutter_client/windows/
+
+# --- PDF/build outputs ---
+latex_pdf/TripartitePdf/
+latex_pdf/target/
+latex_pdf/reference/*.pdf
