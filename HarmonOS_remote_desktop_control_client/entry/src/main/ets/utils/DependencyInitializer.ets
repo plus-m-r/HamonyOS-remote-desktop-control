@@ -6,6 +6,7 @@
 import { DependencyContainer, DependencyKeys } from './DependencyContainer';
 import { CaptureCache } from '../squeeze/CaptureCache';
 import hilog from '@ohos.hilog';
+import { configCenter } from '../config/config';
 
 const DOMAIN = 0xFF00;
 const TAG = 'DependencyInitializer';
@@ -21,7 +22,15 @@ export class DependencyInitializer {
     container.register<CaptureCache>(
       DependencyKeys.CAPTURE_CACHE,
       () => {
-        const captureCache = new CaptureCache(50, 25);
+        const runtimeConfig = configCenter.getCaptureCacheRuntimeConfig();
+        const captureCache = new CaptureCache(runtimeConfig.maxSize, runtimeConfig.purgeSize, {
+          queueMaxSize: runtimeConfig.queueMaxSize,
+          queueMaxBytes: runtimeConfig.queueMaxBytes,
+          queueLowWatermarkBytes: runtimeConfig.queueLowWatermarkBytes,
+          queueHighWatermarkBytes: runtimeConfig.queueHighWatermarkBytes,
+          pressureStartRatio: runtimeConfig.pressureStartRatio,
+          pressureDropDirtyTileRatio: runtimeConfig.pressureDropDirtyTileRatio
+        });
         hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton with lifecycle support');
         return captureCache;
       },

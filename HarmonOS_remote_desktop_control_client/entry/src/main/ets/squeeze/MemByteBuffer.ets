@@ -78,7 +78,8 @@ export class MemByteBuffer {
     if (this.readOffset >= this.writeOffset) {
       throw new Error('Buffer underflow');
     }
-    return this.buffer[this.readOffset++] & 0xFF;
+    const value = this.buffer[this.readOffset++] & 0xFF;
+    return value > 127 ? value - 256 : value;
   }
 
   readUnsignedByte(): number {

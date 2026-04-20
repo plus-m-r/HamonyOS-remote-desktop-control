@@ -182,19 +182,6 @@ export class Injector {
 }
 
 /**
- * 依赖注入装饰器
- * 用于标记需要注入的属性
- */
-export function Inject(key: string): (target: object, propertyKey: string) => void {
-  return (target: object, propertyKey: string): void => {
-    // 简化实现：直接设置属性值
-    // 在ArkTS中，装饰器主要用于元数据标记，实际注入逻辑在运行时处理
-    // 这里只做标记，实际注入在ServiceProvider中处理
-    console.log(`Inject decorator called for key: ${key}, property: ${propertyKey}`);
-  };
-}
-
-/**
  * 服务键常量接口
  */
 interface ServiceKeysType {
@@ -203,11 +190,7 @@ interface ServiceKeysType {
   FILE_SERVICE: string;
   CONNECTION_MANAGER: string;
   PROTOCOL_HANDLER: string;
-  HTTP_CLIENT: string;
-  TCP_CLIENT: string;
-  TCP_REPOSITORY: string;
   WORKER_REPOSITORY: string;
-  HEARTBEAT_MANAGER: string;
 }
 
 /**
@@ -219,9 +202,5 @@ export const ServiceKeys: ServiceKeysType = {
   FILE_SERVICE: 'fileService',
   CONNECTION_MANAGER: 'connectionManager',
   PROTOCOL_HANDLER: 'protocolHandler',
-  HTTP_CLIENT: 'httpClient',
-  TCP_CLIENT: 'tcpClient',
-  TCP_REPOSITORY: 'tcpRepository',
-  WORKER_REPOSITORY: 'workerRepository',
-  HEARTBEAT_MANAGER: 'heartbeatManager'
+  WORKER_REPOSITORY: 'workerRepository'
 };

@@ -5,6 +5,15 @@ import { RegularRunLengthEncoder } from './RunLengthEncoder';
 import { MemByteBuffer } from './MemByteBuffer';
 import { ILifecycleAware } from '../lifecycle/ILifecycleManager';
 
+export interface CaptureQueuePolicy {
+  queueMaxSize: number;
+  queueMaxBytes: number;
+  queueLowWatermarkBytes: number;
+  queueHighWatermarkBytes: number;
+  pressureStartRatio: number;
+  pressureDropDirtyTileRatio: number;
+}
+
 /**
  * Capture缓存类
  * 
@@ -16,21 +25,53 @@ export class CaptureCache implements ILifecycleAware {
   private cache: Map<number, CacheEntry> = new Map();
   // 预捕获对象，用于生成PixelMap
   private preCapture: Capture | null = null;
-  // PixelMap队列，存储待显示的PixelMap
-  private pixelMapQueue: image.PixelMap[] = [];
+  // PixelMap队列，存储待显示的PixelMap及其内存估算
+  private pixelMapQueue: PixelMapQueueEntry[] = [];
+  // PixelMap队列当前累计内存估算（字节）
+  private queuedPixelMapBytes: number = 0;
   
   private readonly maxSize: number;
   private readonly purgeSize: number;
+  private readonly maxPixelMapQueueSize: number;
+  private readonly maxPixelMapQueueBytes: number;
+  private readonly pixelMapQueueHighWatermarkBytes: number;
+  private readonly pixelMapQueueLowWatermarkBytes: number;
+  private readonly pressureStartRatio: number;
+  private readonly pressureDropDirtyTileRatio: number;
   private hits: number = 0;
 
   /**
    * 构造函数
    * @param maxSize 缓存最大容量
    * @param purgeSize 缓存清理数量
+   * @param queuePolicy PixelMap队列预算与压力策略
    */
-  constructor(maxSize: number = 50, purgeSize: number = 25) {
+  constructor(
+    maxSize: number = 50,
+    purgeSize: number = 25,
+    queuePolicy?: CaptureQueuePolicy
+  ) {
     this.maxSize = maxSize;
     this.purgeSize = purgeSize;
+    this.maxPixelMapQueueSize = queuePolicy && queuePolicy.queueMaxSize > 0 ? queuePolicy.queueMaxSize : 3;
+    this.maxPixelMapQueueBytes = queuePolicy && queuePolicy.queueMaxBytes > 0 ? queuePolicy.queueMaxBytes : 64 * 1024 * 1024;
+    const safeLow = queuePolicy && queuePolicy.queueLowWatermarkBytes > 0
+      ? queuePolicy.queueLowWatermarkBytes
+      : 32 * 1024 * 1024;
+    const safeHigh = queuePolicy && queuePolicy.queueHighWatermarkBytes > 0
+      ? queuePolicy.queueHighWatermarkBytes
+      : Math.floor(this.maxPixelMapQueueBytes * 0.85);
+    this.pressureStartRatio = queuePolicy
+      ? Math.max(0.1, Math.min(0.95, queuePolicy.pressureStartRatio))
+      : 0.8;
+    this.pressureDropDirtyTileRatio = queuePolicy
+      ? Math.max(0.01, Math.min(0.9, queuePolicy.pressureDropDirtyTileRatio))
+      : 0.15;
+    this.pixelMapQueueLowWatermarkBytes = Math.min(safeLow, this.maxPixelMapQueueBytes);
+    this.pixelMapQueueHighWatermarkBytes = Math.max(
+      this.pixelMapQueueLowWatermarkBytes,
+      Math.min(safeHigh, this.maxPixelMapQueueBytes)
+    );
   }
 
   /**
@@ -116,9 +157,15 @@ export class CaptureCache implements ILifecycleAware {
       
       // 如果处理了至少一个capture且所有瓦片都非空，则生成PixelMap
       if (processedCount > 0 && allTilesNonEmpty) {
+        if (!this.shouldEnqueueCapture(this.preCapture!)) {
+          resolve(null);
+          return;
+        }
+
         this.createAndCachePixelMap().then(pixelMap => {
-          // 将生成的PixelMap添加到队列中
-          this.pixelMapQueue.push(pixelMap);
+          // 将生成的PixelMap添加到队列中，队列超限时释放最旧项
+          const estimatedBytes = this.estimatePixelMapBytes(this.preCapture!);
+          this.enqueuePixelMap(pixelMap, estimatedBytes);
           resolve(pixelMap);
         }).catch(() => {
           resolve(null);
@@ -337,9 +384,151 @@ export class CaptureCache implements ILifecycleAware {
    */
   dequeuePixelMap(): image.PixelMap | null {
     if (this.pixelMapQueue.length > 0) {
-      return this.pixelMapQueue.shift() || null;
+      const entry = this.pixelMapQueue.shift();
+      if (entry) {
+        this.queuedPixelMapBytes = Math.max(0, this.queuedPixelMapBytes - entry.estimatedBytes);
+        return entry.pixelMap;
+      }
     }
     return null;
+  }
+
+  /**
+   * 向PixelMap队列入队，超限时丢弃最旧项并释放资源
+   * @param pixelMap 要入队的PixelMap
+   * @param estimatedBytes PixelMap内存估算（字节）
+   */
+  private enqueuePixelMap(pixelMap: image.PixelMap, estimatedBytes: number): void {
+    const normalizedBytes = estimatedBytes > 0 ? estimatedBytes : 0;
+
+    // 单帧超过总预算时直接丢弃，防止队列失控
+    if (normalizedBytes > this.maxPixelMapQueueBytes) {
+      try {
+        pixelMap.release();
+      } catch (error) {
+        // 忽略释放错误
+      }
+      return;
+    }
+
+    // 高水位触发后，优先回落到低水位，减少抖动
+    if (this.queuedPixelMapBytes >= this.pixelMapQueueHighWatermarkBytes) {
+      while (
+        this.pixelMapQueue.length > 0 &&
+        this.queuedPixelMapBytes > this.pixelMapQueueLowWatermarkBytes
+      ) {
+        this.dropOldestPixelMap();
+      }
+    }
+
+    // 保证入队后不超过条数和字节预算
+    while (
+      this.pixelMapQueue.length > 0 &&
+      (
+        this.pixelMapQueue.length >= this.maxPixelMapQueueSize ||
+        this.queuedPixelMapBytes + normalizedBytes > this.maxPixelMapQueueBytes
+      )
+    ) {
+      this.dropOldestPixelMap();
+    }
+
+    // latest-wins：若仍无法满足预算，丢弃当前帧
+    if (this.queuedPixelMapBytes + normalizedBytes > this.maxPixelMapQueueBytes) {
+      try {
+        pixelMap.release();
+      } catch (error) {
+        // 忽略释放错误
+      }
+      return;
+    }
+
+    this.pixelMapQueue.push(new PixelMapQueueEntry(pixelMap, normalizedBytes));
+    this.queuedPixelMapBytes += normalizedBytes;
+  }
+
+  /**
+   * 丢弃队首PixelMap并释放资源
+   */
+  private dropOldestPixelMap(): void {
+    const dropped = this.pixelMapQueue.shift();
+    if (!dropped) {
+      return;
+    }
+
+    this.queuedPixelMapBytes = Math.max(0, this.queuedPixelMapBytes - dropped.estimatedBytes);
+    try {
+      dropped.pixelMap.release();
+    } catch (error) {
+      // 忽略释放错误
+    }
+  }
+
+  /**
+   * 是否允许当前Capture进入显示队列
+   * 在高压力场景下，丢弃低价值增量帧，优先保留关键帧/变化较大的帧
+   */
+  private shouldEnqueueCapture(capture: Capture): boolean {
+    // keyframe始终保留
+    if (capture.reset) {
+      return true;
+    }
+
+    const pressureRatio = this.maxPixelMapQueueBytes > 0
+      ? this.queuedPixelMapBytes / this.maxPixelMapQueueBytes
+      : 0;
+    if (pressureRatio < this.pressureStartRatio) {
+      return true;
+    }
+
+    const totalTiles = capture.dirtyTiles.length;
+    if (totalTiles <= 0) {
+      return false;
+    }
+
+    let dirtyCount = 0;
+    for (let i = 0; i < totalTiles; i++) {
+      const tile = capture.dirtyTiles[i];
+      if (tile !== null && tile.capture !== null) {
+        dirtyCount++;
+      }
+    }
+
+    const dirtyRatio = dirtyCount / totalTiles;
+
+    // skipped/merged大于0通常表示中间态增量帧，在高压力且改动小的场景可优先丢弃
+    const lowValueIncremental = (capture.skipped > 0 || capture.merged > 0) &&
+      dirtyRatio < this.pressureDropDirtyTileRatio;
+
+    return !lowValueIncremental;
+  }
+
+  /**
+   * 估算PixelMap内存占用（按RGBA_8888）
+   */
+  private estimatePixelMapBytes(capture: Capture): number {
+    const base = capture.width * capture.height * 4;
+
+    // 低脏块增量帧设置更小的估算权重，提升关键帧保留概率
+    if (capture.reset) {
+      return base;
+    }
+
+    const totalTiles = capture.dirtyTiles.length;
+    if (totalTiles <= 0) {
+      return Math.floor(base * 0.5);
+    }
+
+    let dirtyCount = 0;
+    for (let i = 0; i < totalTiles; i++) {
+      const tile = capture.dirtyTiles[i];
+      if (tile !== null && tile.capture !== null) {
+        dirtyCount++;
+      }
+    }
+
+    const dirtyRatio = dirtyCount / totalTiles;
+    const dynamicWeight = 0.5 + Math.min(0.5, dirtyRatio);
+    return Math.floor(base * dynamicWeight);
   }
 
   /**
@@ -355,14 +544,15 @@ export class CaptureCache implements ILifecycleAware {
    */
   clearPixelMapQueue(): void {
     // 释放队列中所有PixelMap资源
-    for (const pixelMap of this.pixelMapQueue) {
+    for (const entry of this.pixelMapQueue) {
       try {
-        pixelMap.release();
+        entry.pixelMap.release();
       } catch (error) {
         // 忽略释放错误
       }
     }
     this.pixelMapQueue = [];
+    this.queuedPixelMapBytes = 0;
   }
 
   /**
@@ -394,6 +584,7 @@ export class CaptureCache implements ILifecycleAware {
     // 初始化缓存
     this.cache = new Map();
     this.pixelMapQueue = [];
+    this.queuedPixelMapBytes = 0;
   }
 
   /**
@@ -455,5 +646,18 @@ class CacheEntry {
     this.capture = capture;
     this.pixelMap = pixelMap;
     this.lastUsed = Date.now();
+  }
+}
+
+/**
+ * PixelMap队列项
+ */
+class PixelMapQueueEntry {
+  readonly pixelMap: image.PixelMap;
+  readonly estimatedBytes: number;
+
+  constructor(pixelMap: image.PixelMap, estimatedBytes: number) {
+    this.pixelMap = pixelMap;
+    this.estimatedBytes = estimatedBytes;
   }
 }

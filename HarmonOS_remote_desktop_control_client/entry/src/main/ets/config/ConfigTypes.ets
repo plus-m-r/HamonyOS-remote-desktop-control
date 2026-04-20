@@ -65,6 +65,38 @@ export interface CaptureConfig {
 }
 
 /**
+ * Capture缓存配置
+ */
+export interface CaptureCacheConfig {
+  /** Capture对象缓存最大数量 */
+  maxSize: number;
+  /** Capture对象缓存每次清理数量 */
+  purgeSize: number;
+  /** PixelMap队列最大长度 */
+  queueMaxSize: number;
+  /** 队列基础预算（MB） */
+  baseBudgetMB: number;
+  /** 队列最小预算（MB） */
+  minBudgetMB: number;
+  /** 队列最大预算（MB） */
+  maxBudgetMB: number;
+  /** 每百万像素增加的预算（MB） */
+  perMegapixelBudgetMB: number;
+  /** 高刷新率设备附加预算（MB） */
+  highRefreshExtraMB: number;
+  /** 高密度屏幕附加预算（MB） */
+  highDensityExtraMB: number;
+  /** 高水位比例（0-1） */
+  highWatermarkRatio: number;
+  /** 低水位比例（0-1） */
+  lowWatermarkRatio: number;
+  /** 压力触发比例（0-1） */
+  pressureStartRatio: number;
+  /** 压力下低价值帧判定的脏瓦片比例阈值（0-1） */
+  pressureDropDirtyTileRatio: number;
+}
+
+/**
  * 文件传输配置
  */
 export interface FileTransferConfig {
@@ -156,6 +188,8 @@ export interface AppConfig {
   network: NetworkConfig;
   /** 屏幕捕获配置 */
   capture: CaptureConfig;
+  /** Capture缓存配置 */
+  captureCache: CaptureCacheConfig;
   /** 文件传输配置 */
   fileTransfer: FileTransferConfig;
   /** 剪贴板配置 */
@@ -210,6 +244,20 @@ export type ConfigPath =
   | 'capture.compressionLevel'
   | 'capture.tileSize'
   | 'capture.grayscale'
+  | 'captureCache'
+  | 'captureCache.maxSize'
+  | 'captureCache.purgeSize'
+  | 'captureCache.queueMaxSize'
+  | 'captureCache.baseBudgetMB'
+  | 'captureCache.minBudgetMB'
+  | 'captureCache.maxBudgetMB'
+  | 'captureCache.perMegapixelBudgetMB'
+  | 'captureCache.highRefreshExtraMB'
+  | 'captureCache.highDensityExtraMB'
+  | 'captureCache.highWatermarkRatio'
+  | 'captureCache.lowWatermarkRatio'
+  | 'captureCache.pressureStartRatio'
+  | 'captureCache.pressureDropDirtyTileRatio'
   | 'fileTransfer'
   | 'fileTransfer.chunkSize'
   | 'fileTransfer.maxConcurrentUploads'

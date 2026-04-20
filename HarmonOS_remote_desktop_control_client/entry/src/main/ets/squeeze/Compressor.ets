@@ -2,6 +2,7 @@ import hilog from '@ohos.hilog';
 import { MemByteBuffer } from './MemByteBuffer';
 import { CaptureTile } from './CaptureTile';
 import { Capture } from './Capture';
+import { TileCache, NullTileCache, RegularTileCache } from './TileCache';
 
 import { RunLengthEncoder, NullRunLengthEncoder, RegularRunLengthEncoder } from './RunLengthEncoder';
 import { Zipper, ZstdZipper } from './Zipper';
@@ -20,7 +21,7 @@ export enum CompressionMethod {
 export class Compressor {
   private static readonly ZSTD_COMPRESSOR: Compressor = new Compressor(
     CompressionMethod.ZSTD,
-    new RegularRunLengthEncoder(),
+    new NullRunLengthEncoder(),
     new ZstdZipper()
   );
   private static loggedDecompressData: boolean = false;
@@ -28,6 +29,10 @@ export class Compressor {
   readonly method: CompressionMethod;
   private readonly rle: RunLengthEncoder;
   private readonly zipper: Zipper;
+  private tileCache: TileCache = new NullTileCache();
+  private useTileCache: boolean = false;
+  private tileCacheMaxSize: number = 1000;
+  private tileCachePurgeSize: number = 500;
   
   // 缓存上次的尺寸参数和XYWH数组，避免重复计算
   private lastCaptureWidth: number = -1;
@@ -51,6 +56,30 @@ export class Compressor {
     }
   }
 
+  setTileCacheConfig(useCache: boolean, cacheMaxSize: number, cachePurgeSize: number): void {
+    const safeMaxSize = cacheMaxSize > 0 ? cacheMaxSize : 1000;
+    const safePurgeSize = cachePurgeSize > 0 ? cachePurgeSize : 500;
+
+    if (!useCache) {
+      this.useTileCache = false;
+      this.tileCache = new NullTileCache();
+      this.tileCacheMaxSize = safeMaxSize;
+      this.tileCachePurgeSize = safePurgeSize;
+      return;
+    }
+
+    const needRecreate = !this.useTileCache ||
+      this.tileCacheMaxSize !== safeMaxSize ||
+      this.tileCachePurgeSize !== safePurgeSize;
+
+    this.useTileCache = true;
+    if (needRecreate) {
+      this.tileCache = new RegularTileCache(safeMaxSize, safePurgeSize);
+      this.tileCacheMaxSize = safeMaxSize;
+      this.tileCachePurgeSize = safePurgeSize;
+    }
+  }
+
   /**
    * 解压并处理压缩数据，将其转换为Capture对象
    * @param zipped 压缩的字节缓冲区
@@ -66,6 +95,10 @@ export class Compressor {
     // 3. 读取元数据
     const cId = unzipped.readInt(); // 捕获ID
     const cReset = unzipped.readByte() === 1; // 是否重置缓存
+
+    if (cReset) {
+      this.tileCache.clear();
+    }
 
     const cSkipped = unzipped.readUnsignedByte(); // 跳过的帧数
     const cMerged = unzipped.readUnsignedByte(); // 合并的帧数
@@ -133,9 +166,15 @@ export class Compressor {
             // 单级瓦片：value是颜色索引
             dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
           } else if (value === 256) {
-            // 缓存瓦片：由于移除了缓存，创建一个空瓦片
-            unzipped.readInt(); // 跳过cacheId
-            dirty[tidx] = null;
+            // 缓存瓦片：按cacheId恢复，与Java端保持一致
+            const cacheId = unzipped.readInt();
+            const cachedTile = this.tileCache.get(cacheId);
+            if (cachedTile === CaptureTile.MISSING) {
+              // 缓存未命中时保留旧底图，避免出现黑块
+              dirty[tidx] = null;
+            } else {
+              dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cachedTile);
+            }
           } else if (value > 256) {
             // 非缓存的多级瓦片：value是正数，dataLength就是value
             this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, -value);
@@ -199,6 +238,9 @@ export class Compressor {
 
       // 5. 创建瓦片
       dirty[tidx] = CaptureTile.fromCapture(xywh, out);
+      if (this.useTileCache && dirty[tidx] !== null) {
+        this.tileCache.add(dirty[tidx] as CaptureTile);
+      }
       return;
     }
     
@@ -211,5 +253,8 @@ export class Compressor {
 
     // 8. 创建瓦片
     dirty[tidx] = CaptureTile.fromCapture(xywh, out);
+    if (this.useTileCache && dirty[tidx] !== null) {
+      this.tileCache.add(dirty[tidx] as CaptureTile);
+    }
   }
 }

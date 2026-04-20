@@ -44,6 +44,7 @@ import { Capture } from '../../squeeze/Capture';
 import { CaptureCache } from '../../squeeze/CaptureCache';
 import { ChecksumUtils } from '../../utils/ChecksumUtils';
 import { DependencyContainer, DependencyKeys } from '../../utils/DependencyContainer';
+import { DataSamplingUtil } from './DataSamplingUtil';
 import hilog from '@ohos.hilog';
 import fs from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
@@ -99,6 +100,10 @@ export class RemoteControlService implements IRemoteControlService {
     enabled: false,
     compressionMethod: 3 // ZSTD
   };
+
+  private useCompressorCache: boolean = true;
+  private compressorCacheMaxSize: number = 1000;
+  private compressorCachePurgeSize: number = 500;
 
   // 数据处理队列，确保按顺序处理
   private dataQueue: ArrayBuffer[] = [];
@@ -310,7 +315,20 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-    hilog.info(DOMAIN, TAG, 'Sending control event: %{public}s', event.type);
+
+    if (event.type === 'mouse' && event.x !== undefined && event.y !== undefined) {
+      const action = typeof event.button === 'number' ? event.button : (event.action === 'down' || event.action === 'press' ? 1 : 2);
+      await this.sendMouseControl(event.x, event.y, action, undefined);
+      return;
+    }
+
+    if (event.type === 'keyboard' && event.keyCode !== undefined) {
+      const pressed = event.action === 'down' || event.action === 'press';
+      await this.sendKeyControl(event.keyCode, pressed);
+      return;
+    }
+
+    hilog.warn(DOMAIN, TAG, 'Unsupported control event: %{public}s', event.type);
   }
 
   async sendMouseControl(x: number, y: number, action: number, wheelDelta?: number): Promise<void> {
@@ -318,7 +336,20 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-    hilog.info(DOMAIN, TAG, 'Sending mouse control: x=%{public}d, y=%{public}d, action=%{public}d', x, y, action);
+
+    if (!this.remoteDeviceCode) {
+      hilog.warn(DOMAIN, TAG, 'Remote device code not available');
+      return;
+    }
+
+    try {
+      const mouseCmd = CmdUtils.createMouseControlCmd(this.remoteDeviceCode, x, y, action, wheelDelta);
+      const encoded = CmdCodec.encode(mouseCmd);
+      await this.connectionManager.send(encoded);
+      hilog.info(DOMAIN, TAG, 'Sent mouse control: x=%{public}d, y=%{public}d, action=%{public}d, wheelDelta=%{public}s', x, y, action, wheelDelta !== undefined ? String(wheelDelta) : 'none');
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to send mouse control: %{public}s', error instanceof Error ? error.message : String(error));
+    }
   }
 
   async sendKeyControl(keyCode: number, pressed: boolean): Promise<void> {
@@ -326,7 +357,20 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.warn(DOMAIN, TAG, 'Remote control not enabled');
       return;
     }
-    hilog.info(DOMAIN, TAG, 'Sending key control: keyCode=%{public}d, pressed=%{public}s', keyCode, String(pressed));
+
+    if (!this.remoteDeviceCode) {
+      hilog.warn(DOMAIN, TAG, 'Remote device code not available');
+      return;
+    }
+
+    try {
+      const keyCmd = CmdUtils.createKeyControlCmd(this.remoteDeviceCode, keyCode, pressed);
+      const encoded = CmdCodec.encode(keyCmd);
+      await this.connectionManager.send(encoded);
+      hilog.info(DOMAIN, TAG, 'Sent key control: keyCode=%{public}d, pressed=%{public}s', keyCode, String(pressed));
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to send key control: %{public}s', error instanceof Error ? error.message : String(error));
+    }
   }
 
   setDeviceInfoCallback(callback: DeviceInfoCallback): void {
@@ -408,7 +452,7 @@ export class RemoteControlService implements IRemoteControlService {
         this.handleCaptureResponse(cmd);
         break;
       case CmdType.Capture:
-        this.handleCaptureData(cmd);
+        await this.handleCaptureData(cmd);
         break;
       case CmdType.CaptureConfig:
         this.handleCaptureConfigCommand(cmd);
@@ -446,6 +490,7 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.info(DOMAIN, TAG, 'Remote screen capture started');
       this.videoConfig.enabled = true;
       this.captureProcessor.reset();
+      this.captureCache.clear();
       // TileCache 将通过 CompressorConfig 命令配置
       hilog.info(DOMAIN, TAG, 'Waiting for CompressorConfig to set up tile cache');
     } else {
@@ -481,11 +526,17 @@ export class RemoteControlService implements IRemoteControlService {
   private handleCompressorConfigCommand(cmd: ConcreteCmd): void {
     const data = cmd.getData();
     const compressionMethod = data.compressionMethod || 3;
+    const useCache = data.useCache !== undefined ? data.useCache : true;
+    const cacheMaxSize = data.cacheMaxSize || 1000;
+    const cachePurgeSize = data.cachePurgeSize || 500;
 
     hilog.info(DOMAIN, TAG, 'CompressorConfig - compressionMethod: %{public}d', compressionMethod);
 
     // 更新压缩方法配置
     this.videoConfig.compressionMethod = compressionMethod;
+    this.useCompressorCache = useCache;
+    this.compressorCacheMaxSize = cacheMaxSize;
+    this.compressorCachePurgeSize = cachePurgeSize;
   }
 
   /**
@@ -525,7 +576,7 @@ export class RemoteControlService implements IRemoteControlService {
     }
 
     // 调用 onRawVideoData 处理视频数据
-    await this.onRawVideoData(payloadBuffer, compressionMethod);
+    await this.onRawVideoData(payloadBuffer, compressionMethod, compressionConfig);
   }
 
   /**
@@ -601,7 +652,11 @@ export class RemoteControlService implements IRemoteControlService {
   private saveDataCounter: number = 0;
   private readonly DEBUG_SAVE_FIRST_FRAME: boolean = false; // 控制是否保存第一帧数据
 
-  private async onRawVideoData(data: ArrayBuffer, compressionMethod: number = 3): Promise<void> {
+  private async onRawVideoData(
+    data: ArrayBuffer,
+    compressionMethod: number = 3,
+    compressionConfig?: CompressionConfig
+  ): Promise<void> {
     hilog.info(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
       data.byteLength, compressionMethod);
 
@@ -625,6 +680,10 @@ export class RemoteControlService implements IRemoteControlService {
           break;
       }
       const compressor = Compressor.get(squeezeMethod);
+      const useCache = compressionConfig ? compressionConfig.useCache : this.useCompressorCache;
+      const cacheMaxSize = compressionConfig ? compressionConfig.cacheMaxSize : this.compressorCacheMaxSize;
+      const cachePurgeSize = compressionConfig ? compressionConfig.cachePurgeSize : this.compressorCachePurgeSize;
+      compressor.setTileCacheConfig(useCache, cacheMaxSize, cachePurgeSize);
       let capture: Capture = await compressor.decompress(zippedData);
       
       // 检查缓存中是否存在相同ID的Capture
@@ -638,25 +697,43 @@ export class RemoteControlService implements IRemoteControlService {
         hilog.info(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
       }
       
-      // 设置预捕获对象
-      this.captureCache.setPreCapture(capture);
-      
-      const captureWidth = capture.width;
-      const captureHeight = capture.height;
-      const tileWidth = capture.tileWidth;
-      const tileHeight = capture.tileHeight;
-      const cId = capture.id;
-      const cReset = capture.reset;
-      const cSkipped = capture.skipped;
-      const cMerged = capture.merged;
+      // 使用 preCapture 作为完整帧基线：增量帧只覆盖变化瓦片
+      const currentCapture = capture;
+      const existingPreCapture = this.captureCache.getPreCapture();
+      const canMergeToPreCapture =
+        existingPreCapture !== null &&
+        !currentCapture.reset &&
+        existingPreCapture.width === currentCapture.width &&
+        existingPreCapture.height === currentCapture.height &&
+        existingPreCapture.tileWidth === currentCapture.tileWidth &&
+        existingPreCapture.tileHeight === currentCapture.tileHeight;
+
+      if (canMergeToPreCapture) {
+        const pre = existingPreCapture as Capture;
+        for (let i = 0; i < currentCapture.dirtyTiles.length; i++) {
+          const tile = currentCapture.dirtyTiles[i];
+          if (tile !== null && tile.capture !== null) {
+            pre.dirtyTiles[i] = tile;
+          }
+        }
+      } else {
+        this.captureCache.setPreCapture(currentCapture);
+      }
+
+      const renderCapture = this.captureCache.getPreCapture() as Capture;
+
+      const captureWidth = renderCapture.width;
+      const captureHeight = renderCapture.height;
+      const tileWidth = renderCapture.tileWidth;
+      const tileHeight = renderCapture.tileHeight;
+      const cId = currentCapture.id;
+      const cReset = currentCapture.reset;
       const bufferSize = captureWidth * captureHeight * 4;
       
 
       
-      // 2. 准备图像缓冲区
+      // 2. 准备图像缓冲区（增量帧复用上一帧）
       let imageBuffer: Uint8Array;
-      const prevParams = this.captureProcessor.getPrevBufferParams();
-      const debugPos = zippedData.getReadOffset();
       
       // 保存第一帧的所有步骤数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
@@ -667,28 +744,26 @@ export class RemoteControlService implements IRemoteControlService {
 
         // 5. 保存解压后的 Capture 信息（步骤2）
         const captureInfo: CaptureInfo = {
-          id: capture.id,
-          reset: capture.reset,
-          width: capture.width,
-          height: capture.height,
-          tileWidth: capture.tileWidth,
-          tileHeight: capture.tileHeight,
-          dirtyTilesCount: capture.dirtyTiles.filter((t) => t !== null).length
+          id: currentCapture.id,
+          reset: currentCapture.reset,
+          width: renderCapture.width,
+          height: renderCapture.height,
+          tileWidth: renderCapture.tileWidth,
+          tileHeight: renderCapture.tileHeight,
+          dirtyTilesCount: renderCapture.dirtyTiles.filter((t) => t !== null).length
         };
         await this.saveJsonToFile(`data/step2_capture_info_${this.saveDataCounter}_${timestamp}.json`, captureInfo);
         this.saveDataCounter++;
 
         // 6. 保存第一个瓦片的原始数据（如果有）
-        const firstDirtyTile = capture.dirtyTiles.find(t => t !== null);
+        const firstDirtyTile = renderCapture.dirtyTiles.find(t => t !== null);
         if (firstDirtyTile && firstDirtyTile.capture) {
           await this.saveArrayBufferToFile(`data/step3_first_tile_data_${timestamp}.bin`, firstDirtyTile.capture.getInternal().buffer as ArrayBuffer);
         }
       }
 
-      // 3. 创建图像缓冲区
-      // 由于CaptureProcessor不再返回prevBuffer，我们总是创建新的缓冲区
+      // 3. 创建图像缓冲区并清为黑底，再由 preCapture 绘制完整画面
       imageBuffer = new Uint8Array(bufferSize);
-      // 初始化缓冲区为不透明的黑色背景
       for (let i = 0; i < bufferSize; i += 4) {
         imageBuffer[i] = 0x00; // B 通道：黑色
         imageBuffer[i + 1] = 0x00; // G 通道：黑色
@@ -702,14 +777,38 @@ export class RemoteControlService implements IRemoteControlService {
         await this.saveArrayBufferToFile(`data/step4_before_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
       }
 
-      // 9. 将 dirty tiles 绘制到缓冲区
-      capture.drawToBuffer(imageBuffer);
+      // 9. 将 preCapture 的完整瓦片绘制到缓冲区
+      renderCapture.drawToBuffer(imageBuffer);
 
       // 保存第一帧的绘制后数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
       if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
         const timestamp = Date.now();
         // 10. 保存绘制后的缓冲区（步骤5）
         await this.saveArrayBufferToFile(`data/step5_after_draw_${timestamp}.raw`, imageBuffer.buffer as ArrayBuffer);
+      }
+
+      // 数据采样：保存最终组装后的图像数据（第四层）
+      if (DataSamplingUtil.canSample()) {
+        // 使用capture.id作为采样ID
+        await DataSamplingUtil.saveFinalImageData(capture.id, imageBuffer, "after_draw");
+        
+        // 生成并保存元数据
+        const metadata = DataSamplingUtil.generateMetadata(
+          capture.id,
+          Date.now(),
+          data.byteLength,
+          zippedData.size(),
+          0, // RLE输入大小（在Compressor中采样）
+          0, // RLE输出大小（在Compressor中采样）
+          imageBuffer.length * 4, // 最终图像大小
+          CompressionMethod[compressionMethod],
+          captureWidth,
+          captureHeight,
+          tileWidth,
+          tileHeight,
+          renderCapture.dirtyTiles.filter((t) => t !== null).length
+        );
+        await DataSamplingUtil.saveMetadata(capture.id, metadata);
       }
 
       // 4. 处理帧
