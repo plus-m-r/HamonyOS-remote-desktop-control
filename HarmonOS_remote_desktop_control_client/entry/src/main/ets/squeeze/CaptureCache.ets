@@ -1,48 +1,34 @@
 import { Capture } from './Capture';
 import { CaptureTile } from './CaptureTile';
-import { ILifecycleAware } from '../lifecycle/ILifecycleManager';
-
-export interface CaptureQueuePolicy {
-  queueMaxSize: number;
-  queueMaxBytes: number;
-  queueLowWatermarkBytes: number;
-  queueHighWatermarkBytes: number;
-  pressureStartRatio: number;
-  pressureDropDirtyTileRatio: number;
-}
 
 /**
  * Capture缓存类
  *
- * 只负责上一帧基线、增量补全和待处理队列管理，不承担最终渲染职责。
+ * 负责管理preCapture基线帧和pending待补全队列。
+ * 用于处理异步网络环境下的帧合并和补全。
  */
-export class CaptureCache implements ILifecycleAware {
-  private cache: Map<number, CacheEntry> = new Map();
-  private pendingCaptureIds: number[] = [];
-  private pendingCaptureIdSet: Set<number> = new Set();
+export class CaptureCache {
   private preCapture: Capture | null = null;
-
+  private pendingCaptures: Map<number, Capture> = new Map();
+  private pendingQueue: number[] = [];
   private readonly maxSize: number;
   private readonly purgeSize: number;
-  private hits: number = 0;
 
-  constructor(
-    maxSize: number = 50,
-    purgeSize: number = 25,
-    _queuePolicy?: CaptureQueuePolicy
-  ) {
+  constructor(maxSize: number = 10, purgeSize: number = 5) {
     this.maxSize = maxSize;
     this.purgeSize = purgeSize;
   }
 
   /**
-   * 设置预捕获对象
+   * 设置预捕获对象作为渲染基线
    */
   setPreCapture(capture: Capture): void {
     this.preCapture = capture;
-
-    if (this.pendingCaptureIdSet.delete(capture.id)) {
-      this.compactPendingQueueIfNeeded();
+    // 从pending队列中移除（如果存在）
+    const index = this.pendingQueue.indexOf(capture.id);
+    if (index !== -1) {
+      this.pendingQueue.splice(index, 1);
+      this.pendingCaptures.delete(capture.id);
     }
   }
 
@@ -65,26 +51,22 @@ export class CaptureCache implements ILifecycleAware {
     const tileUpdates: Map<number, CaptureTile> = new Map();
     let processedCount = 0;
 
-    while (processedCount < maxCaptures && this.pendingCaptureIds.length > 0) {
-      const pendingId = this.pendingCaptureIds.shift();
+    while (processedCount < maxCaptures && this.pendingQueue.length > 0) {
+      const pendingId = this.pendingQueue.shift();
       if (pendingId === undefined) {
         break;
       }
 
-      if (!this.pendingCaptureIdSet.has(pendingId)) {
-        continue;
-      }
-      this.pendingCaptureIdSet.delete(pendingId);
-
-      const entry = this.cache.get(pendingId);
-      if (!entry) {
+      const capture = this.pendingCaptures.get(pendingId);
+      if (!capture) {
         continue;
       }
 
-      const capture = entry.capture;
+      // 从pending队列中移除
+      this.pendingCaptures.delete(pendingId);
 
+      // 跳过过期或尺寸不匹配的帧
       if (capture.id <= this.preCapture.id) {
-        this.remove(capture.id);
         continue;
       }
 
@@ -94,22 +76,21 @@ export class CaptureCache implements ILifecycleAware {
         capture.tileWidth !== this.preCapture.tileWidth ||
         capture.tileHeight !== this.preCapture.tileHeight
       ) {
-        this.remove(capture.id);
         continue;
       }
 
       processedCount++;
 
+      // 收集有效瓦片
       for (let i = 0; i < capture.dirtyTiles.length; i++) {
         const tile = capture.dirtyTiles[i];
         if (tile !== null && tile.capture !== null) {
           tileUpdates.set(i, tile);
         }
       }
-
-      this.remove(capture.id);
     }
 
+    // 批量应用瓦片更新
     const entries = Array.from(tileUpdates.entries());
     for (let i = 0; i < entries.length; i++) {
       const index = entries[i][0];
@@ -139,154 +120,28 @@ export class CaptureCache implements ILifecycleAware {
   }
 
   /**
-   * 添加Capture到缓存
+   * 添加待补全的Capture到pending队列
    */
-  add(capture: Capture): void {
-    if (this.cache.size >= this.maxSize) {
-      this.purge();
-    }
-
-    this.cache.set(capture.id, new CacheEntry(capture));
-
-    if (!this.pendingCaptureIdSet.has(capture.id)) {
-      this.pendingCaptureIds.push(capture.id);
-      this.pendingCaptureIdSet.add(capture.id);
+  addPending(capture: Capture): void {
+    if (!this.pendingCaptures.has(capture.id)) {
+      this.pendingCaptures.set(capture.id, capture);
+      this.pendingQueue.push(capture.id);
     }
   }
 
   /**
-   * 从缓存中获取Capture
-   */
-  get(id: number): Capture | null {
-    const entry = this.cache.get(id);
-    if (entry) {
-      entry.lastUsed = Date.now();
-      this.hits++;
-      return entry.capture;
-    }
-    return null;
-  }
-
-  /**
-   * 从缓存中移除Capture
-   */
-  remove(id: number): void {
-    this.cache.delete(id);
-    if (this.pendingCaptureIdSet.delete(id)) {
-      this.compactPendingQueueIfNeeded();
-    }
-  }
-
-  /**
-   * 清空缓存
+   * 清空所有状态
    */
   clear(): void {
-    this.cache.clear();
-    this.pendingCaptureIds = [];
-    this.pendingCaptureIdSet.clear();
     this.preCapture = null;
-    this.hits = 0;
+    this.pendingCaptures.clear();
+    this.pendingQueue = [];
   }
 
   /**
-   * 获取待补全队列中有效capture数量
+   * 获取待补全队列大小
    */
   getPendingCaptureQueueSize(): number {
-    return this.pendingCaptureIdSet.size;
-  }
-
-  /**
-   * 获取缓存大小
-   */
-  size(): number {
-    return this.cache.size;
-  }
-
-  /**
-   * 获取缓存命中次数
-   */
-  getHits(): number {
-    return this.hits;
-  }
-
-  /**
-   * 重置命中次数
-   */
-  resetHits(): void {
-    this.hits = 0;
-  }
-
-  /**
-   * 清理最久未使用的缓存项
-   */
-  private purge(): void {
-    const entries = Array.from(this.cache.values());
-    entries.sort((a, b) => a.lastUsed - b.lastUsed);
-    const toRemove = Math.min(this.purgeSize, entries.length);
-    for (let i = 0; i < toRemove; i++) {
-      this.remove(entries[i].capture.id);
-    }
-  }
-
-  /**
-   * 当队列中僵尸ID占比过高时压缩队列
-   */
-  private compactPendingQueueIfNeeded(): void {
-    if (this.pendingCaptureIds.length === 0) {
-      return;
-    }
-
-    if (this.pendingCaptureIds.length <= this.pendingCaptureIdSet.size * 2) {
-      return;
-    }
-
-    const compacted: number[] = [];
-    for (let i = 0; i < this.pendingCaptureIds.length; i++) {
-      const id = this.pendingCaptureIds[i];
-      if (this.pendingCaptureIdSet.has(id)) {
-        compacted.push(id);
-      }
-    }
-
-    this.pendingCaptureIds = compacted;
-  }
-
-  onCreate(): void {
-    console.log('CaptureCache onCreate');
-    this.cache = new Map();
-    this.pendingCaptureIds = [];
-    this.pendingCaptureIdSet = new Set();
-    this.preCapture = null;
-  }
-
-  onStart(): void {
-    console.log('CaptureCache onStart');
-  }
-
-  onResume(): void {
-    console.log('CaptureCache onResume');
-  }
-
-  onPause(): void {
-    console.log('CaptureCache onPause');
-  }
-
-  onStop(): void {
-    console.log('CaptureCache onStop');
-  }
-
-  onDestroy(): void {
-    console.log('CaptureCache onDestroy');
-    this.clear();
-  }
-}
-
-class CacheEntry {
-  readonly capture: Capture;
-  lastUsed: number;
-
-  constructor(capture: Capture) {
-    this.capture = capture;
-    this.lastUsed = Date.now();
+    return this.pendingQueue.length;
   }
 }

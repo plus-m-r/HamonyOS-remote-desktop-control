@@ -134,6 +134,7 @@ public class CaptureEngine implements ReConfigurable<CaptureEngineConfiguration>
                 Log.info("CaptureFactory has finished!");
                 break;
             }
+
             fireOnRawCaptured(captureId, pixels); // debugging purpose (!)
             final CaptureTile[] dirty = computeDirtyTiles(pixels);
 
@@ -144,7 +145,7 @@ public class CaptureEngine implements ReConfigurable<CaptureEngineConfiguration>
                 reset.set(false);
             }
 
-            skipped = syncOnTick(start, captureCount, captureId, tick);
+            skipped = syncOnTick(start, captureCount, tick);
             captureCount += skipped;
             captureId += skipped;
 
@@ -152,16 +153,15 @@ public class CaptureEngine implements ReConfigurable<CaptureEngineConfiguration>
         Log.info("The capture engine has been stopped!");
     }
 
-    private static int syncOnTick(final long start, final int captureCount, final int captureId, final long tick) throws InterruptedException {
+    private static int syncOnTick(final long start, final int captureCount, final long tick) throws InterruptedException {
         int delayedCaptureCount = 0;
         while (true) {
             final long captureMaxEnd = start + (captureCount + delayedCaptureCount) * tick;
             final long capturePause = captureMaxEnd - System.currentTimeMillis();
             if (capturePause < 0) {
                 ++delayedCaptureCount;
-//                Log.warn(format("Skipping capture (%d) %s", captureId + delayedCaptureCount, UnitUtilities.toElapsedTime(-capturePause)));
             } else if (capturePause > 0) {
-                Thread.sleep(capturePause);
+                java.util.concurrent.TimeUnit.MILLISECONDS.sleep(capturePause);
                 return delayedCaptureCount;
             }
         }

@@ -5,6 +5,8 @@ import { ServiceProvider } from '../di/ServiceProvider';
 import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { image } from '@kit.ImageKit';
+import { PerformanceOverlay } from '../components/PerformanceOverlay';
+import { PerformanceStats } from '../utils/PerformanceMonitor';
 
 interface RouterParams {
   deviceId?: string;
@@ -39,6 +41,23 @@ struct Control {
 
   // 用于显示远程屏幕画面
   @State private screenPixelMap: image.PixelMap | null = null;
+  
+  // 性能监控浮窗显示状态
+  @Provide showPerformanceOverlay: boolean = true; // 默认开启
+  @State performanceStats: PerformanceStats = {
+    fps: 0,
+    avgFps: 0,
+    minFps: 0,
+    maxFps: 0,
+    avgFrameDelay: 0,
+    currentFrameDelay: 0,
+    totalFrames: 0,
+    skippedFrames: 0,
+    skipRate: 0
+  };
+  
+  // 性能数据更新定时器
+  private perfUpdateTimer: number | null = null;
 
   constructor() {
     super();
@@ -117,6 +136,12 @@ struct Control {
           }
         }
       });
+      
+      // 启动性能数据更新定时器（每秒更新一次）
+      this.perfUpdateTimer = setInterval(() => {
+        const monitor = ServiceProvider.remoteControlService.getPerformanceMonitor();
+        this.performanceStats = monitor.getStats();
+      }, 1000);
 
       // 设置 UIContext 用于主线程渲染
       const uiContext = this.getUIContext();
@@ -130,6 +155,13 @@ struct Control {
 
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Control页面销毁');
+    
+    // 清理性能监控定时器
+    if (this.perfUpdateTimer !== null) {
+      clearInterval(this.perfUpdateTimer);
+      this.perfUpdateTimer = null;
+    }
+    
     this.viewModel.dispose();
     if (this.screenPixelMap) {
       try {
@@ -249,6 +281,11 @@ struct Control {
             .height('100%')
             .textAlign(TextAlign.Center)
             .backgroundColor('#808080')
+        }
+        
+        // 性能监控浮窗
+        if (this.showPerformanceOverlay) {
+          PerformanceOverlay({ stats: this.performanceStats })
         }
 
         // 拖拽提示层（可选）

@@ -4,6 +4,7 @@
 import { ConnectionState, RemoteControlEvent, DeviceValidationResult } from '../../models/DeviceInfo';
 import { ClientInfoCallback, ConnectionCallback, ClipboardCallback } from '../../models/CmdProtocol';
 import { UIContext } from '@kit.ArkUI';
+import { PerformanceMonitor } from '../../utils/PerformanceMonitor';
 
 /**
  * 远程控制服务配置
@@ -129,6 +130,11 @@ export interface IRemoteControlService {
    * 获取远程设备信息
    */
   getRemoteDeviceInfo(): DeviceCredentials;
+
+  /**
+   * 获取性能监控器实例
+   */
+  getPerformanceMonitor(): PerformanceMonitor;
 
   // ========== 权限控制 ==========
 

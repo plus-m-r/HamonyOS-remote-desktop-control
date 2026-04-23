@@ -1,8 +1,12 @@
 
 // entry/src/main/ets/network/TcpClient.ets
 import socket from '@ohos.net.socket';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Cmd } from '../models/CmdProtocol';
 import { CmdCodec } from './CmdCodec';
+
+const DOMAIN = 0x0001;
+const TAG = 'TcpClient';
 
 export class TcpClient {
   private tcpSocket: socket.TCPSocket;
@@ -144,9 +148,9 @@ export class TcpClient {
     }, this.reconnectInterval);
   }
   
-  public send(data: any): void {
+  public send(data: ArrayBuffer): void {
     if (!this.isConnectedFlag) {
-      console.error('TcpClient: Not connected, cannot send data');
+      hilog.error(DOMAIN, TAG, 'Not connected, cannot send data');
       return;
     }
     

@@ -36,16 +36,16 @@ export class CaptureTile {
 
   static fromSingleLevel(xywh: XYWH, singleLevel: number): CaptureTile {
     const data = new Uint8Array(xywh.w * xywh.h * 4);
-    // RGBA格式：R, G, B, A
+    // RGBA格式：R=G=B=singleLevel, A=255（不透明）
     for (let i = 0; i < data.length; i += 4) {
       data[i] = singleLevel;     // R
       data[i + 1] = singleLevel; // G
       data[i + 2] = singleLevel; // B
-      data[i + 3] = 0xff;        // A (不透明)
+      data[i + 3] = 255;         // A (必须不透明)
     }
     const capture = MemByteBuffer.fromArray(data);
-    const checksum = CaptureTile.computeChecksum(data);
-    return new CaptureTile(checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
+    // 与Java端一致：单级瓦片的checksum为-1
+    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
   }
 
   static fromCapture(xywh: XYWH, capture: MemByteBuffer): CaptureTile {
@@ -55,15 +55,10 @@ export class CaptureTile {
   }
 
   static fromCache(xywh: XYWH, cached: CaptureTile): CaptureTile {
-    let capture: MemByteBuffer | null;
-    if (cached === CaptureTile.MISSING) {
-      const data = new Uint8Array(xywh.w * xywh.h * 4);
-      capture = MemByteBuffer.fromArray(data);
-      return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
-    } else {
-      capture = cached.capture;
-      return new CaptureTile(cached.checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
-    }
+    // 此时cached一定不是MISSING（Compressor中已处理）
+    const capture = cached.capture;
+    // 与Java端一致：fromCache的checksum为-1
+    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, true);
   }
 
   /**

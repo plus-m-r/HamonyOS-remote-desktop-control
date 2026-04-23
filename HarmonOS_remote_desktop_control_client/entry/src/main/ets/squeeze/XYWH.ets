@@ -10,10 +10,6 @@ export class XYWH {
     this.w = w;
     this.h = h;
   }
-
-  equals(x: number, y: number, w: number, h: number): boolean {
-    return x === this.x && y === this.y && w === this.w && h === this.h;
-  }
 }
 
 class XYWHConfiguration {

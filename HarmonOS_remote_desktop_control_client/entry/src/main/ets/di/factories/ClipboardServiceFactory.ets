@@ -5,6 +5,10 @@ import { ClipboardService } from '../../services/clipboard/ClipboardService';
 import { IClipboardService } from '../../services/interfaces/IClipboardService';
 import { configCenter } from '../../config/config';
 import { HttpRepositoryImpl } from '../../repository/HttpRepositoryImpl';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'ClipboardServiceFactory';
 
 /**
  * 剪贴板服务工厂
@@ -31,7 +35,7 @@ export class ClipboardServiceFactory {
       maxTextLength: 10000
     });
 
-    console.info('ClipboardServiceFactory: Service created');
+    hilog.info(DOMAIN, TAG, 'Service created');
 
     return service;
   }

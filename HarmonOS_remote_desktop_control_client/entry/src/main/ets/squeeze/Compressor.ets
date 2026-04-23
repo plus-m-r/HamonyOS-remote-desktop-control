@@ -166,20 +166,17 @@ export class Compressor {
             // 单级瓦片：value是颜色索引
             dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
           } else if (value === 256) {
-            // 缓存瓦片：按cacheId恢复，与Java端保持一致
+            // 缓存瓦片：按cacheId恢复
             const cacheId = unzipped.readInt();
             const cachedTile = this.tileCache.get(cacheId);
             if (cachedTile === CaptureTile.MISSING) {
-              // 缓存未命中时保留旧底图，避免出现黑块
+              // 缓存未命中时设为null，保留上一帧内容（优于显示黑块）
               dirty[tidx] = null;
             } else {
               dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cachedTile);
             }
-          } else if (value > 256) {
-            // 非缓存的多级瓦片：value是正数，dataLength就是value
-            this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, -value);
           } else {
-            // 其他情况：value是负数，dataLength是其绝对值
+            // 未缓存的多级瓦片：value是负数，dataLength是其绝对值
             this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, value);
           }
           processedCount++;
@@ -201,7 +198,10 @@ export class Compressor {
     // 6. 创建Capture对象，包含所有处理后的信息
     const capture = new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty);
     
-    // 7. 返回处理后的Capture对象
+    // 7. 通知缓存一帧已处理完成（触发LRU清理）
+    this.tileCache.onCaptureProcessed();
+    
+    // 8. 返回处理后的Capture对象
     return capture;
   }
 
@@ -218,8 +218,7 @@ export class Compressor {
     const dataLength = -value;
     
     // 2. 检查数据长度是否有效（> 0 且 <= 1MB）
-    if (dataLength <= 0 || dataLength > 1024 * 1024) { // 添加上限检查，防止过大的数据
-      // 数据长度无效，跳过处理
+    if (dataLength <= 0 || dataLength > 1024 * 1024) {
       hilog.error(DOMAIN, TAG, 'processUncached: invalid dataLength: %{public}d (value: %{public}d)', dataLength, value);
       return;
     }
@@ -227,7 +226,6 @@ export class Compressor {
     // 3. 检查缓冲区是否有足够的数据
     const available = unzipped.getWriteOffset() - unzipped.getReadOffset();
     if (available < dataLength) {
-      // 数据不足，使用实际可用的数据
       hilog.warn(DOMAIN, TAG, 'processUncached: not enough data available: %{public}d, needed: %{public}d, using available data', available, dataLength);
       // 读取所有可用数据
       const tdata = unzipped.readBytes(available);
@@ -238,9 +236,8 @@ export class Compressor {
 
       // 5. 创建瓦片
       dirty[tidx] = CaptureTile.fromCapture(xywh, out);
-      if (this.useTileCache && dirty[tidx] !== null) {
-        this.tileCache.add(dirty[tidx] as CaptureTile);
-      }
+      // 与Java端一致：无条件添加到缓存
+      this.tileCache.add(dirty[tidx] as CaptureTile);
       return;
     }
     
@@ -253,8 +250,7 @@ export class Compressor {
 
     // 8. 创建瓦片
     dirty[tidx] = CaptureTile.fromCapture(xywh, out);
-    if (this.useTileCache && dirty[tidx] !== null) {
-      this.tileCache.add(dirty[tidx] as CaptureTile);
-    }
+    // 与Java端一致：无条件添加到缓存
+    this.tileCache.add(dirty[tidx] as CaptureTile);
   }
 }

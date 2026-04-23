@@ -19,6 +19,10 @@ import {
   EnvironmentType,
   TcpAddress
 } from './ConfigTypes';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'ConfigCenter';
 
 export interface CaptureCacheRuntimeConfig {
   maxSize: number;
@@ -36,7 +40,7 @@ export interface CaptureCacheRuntimeConfig {
  */
 const DEFAULT_CONFIG: AppConfig = {
   server: {
-    host: '10.38.19.147',
+    host: '10.0.2.2',
     tcpPort: 54321,
     httpPort: 12345,
     contextPath: '/remote-desktop-control'
@@ -125,7 +129,7 @@ interface EnvironmentConfigs {
 const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   development: {
     server: {
-      host: '10.38.19.147',
+      host: '10.0.2.2',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -164,7 +168,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   production: {
     server: {
-      host: '10.38.19.147',
+      host: '10.0.2.2',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -235,13 +239,13 @@ export class ConfigCenter {
   private constructor() {
     this.config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     this.detectEnvironment();
-    console.info('ConfigCenter: Initialized');
+    hilog.info(DOMAIN, TAG, 'Initialized');
   }
 
   private detectEnvironment(): void {
     this.currentEnvironment = 'production';
     this.applyEnvironmentConfig();
-    console.info(`ConfigCenter: Environment detected as ${this.currentEnvironment}`);
+    hilog.info(DOMAIN, TAG, 'Environment detected as %{public}s', this.currentEnvironment);
   }
 
   private applyEnvironmentConfig(): void {
@@ -258,7 +262,7 @@ export class ConfigCenter {
       envConfig = ENVIRONMENT_CONFIGS.emulator;
     }
     this.config = this.mergeConfig(this.config, envConfig);
-    console.info(`ConfigCenter: Applied ${this.currentEnvironment} environment config`);
+    hilog.info(DOMAIN, TAG, 'Applied %{public}s environment config', this.currentEnvironment);
   }
 
   private mergeConfig(target: AppConfig, source: Partial<AppConfig>): AppConfig {

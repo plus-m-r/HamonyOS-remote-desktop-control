@@ -2,6 +2,10 @@ import { ConnectionManager } from '../../services/connection/ConnectionManager';
 import { IConnectionManager } from '../../services/connection/IConnectionManager';
 import { configCenter } from '../../config/config';
 import { TcpRepositoryImpl } from '../../repository/TcpRepositoryImpl';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'ConnectionManagerFactory';
 
 export class ConnectionManagerFactory {
   static create(): IConnectionManager {
@@ -16,7 +20,7 @@ export class ConnectionManagerFactory {
       2000
     );
 
-    console.info('ConnectionManagerFactory: Created');
+    hilog.info(DOMAIN, TAG, 'Created');
     return connectionManager;
   }
 }

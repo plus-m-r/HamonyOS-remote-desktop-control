@@ -1,4 +1,8 @@
 import taskpool from '@ohos.taskpool';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'TaskPoolUtil';
 
 /**
  * TaskPool工具类，用于处理并发任务
@@ -16,7 +20,7 @@ export class TaskPoolUtil {
       const result = await taskpool.execute(task, args);
       return result as T;
     } catch (error) {
-      console.error('TaskPoolUtil: Failed to execute task', error);
+      hilog.error(DOMAIN, TAG, 'Failed to execute task: %{public}s', error instanceof Error ? error.message : String(error));
       throw new Error(error instanceof Error ? error.message : String(error));
     }
   }

@@ -99,15 +99,11 @@ export class CmdUtils {
    */
   static createCaptureDataCmd(
     imageData: string | ArrayBuffer,
-    width: number,
-    height: number,
     compressionMethod: CompressionMethod | number,
     compressionConfig?: CompressionConfig
   ): ConcreteCmd {
     const data = new CmdData();
     data.imageData = imageData;
-    data.width = width;
-    data.height = height;
     data.compressionMethod = compressionMethod as number;
     if (compressionConfig) {
       data.compressionConfig = compressionConfig;

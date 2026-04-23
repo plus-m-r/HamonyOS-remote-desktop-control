@@ -59,7 +59,7 @@ export interface IMessage {
   /** 发送时间戳 */
   timestamp: number;
   /** 消息数据 */
-  payload?: any;
+  payload?: Record<string, Object>;
   /** 消息优先级 */
   priority?: MessagePriority;
   /** 源线程ID */
@@ -101,7 +101,7 @@ export interface IMessageBus {
    * @param payload 消息数据
    * @param priority 优先级
    */
-  sendMessage(type: MessageType, payload?: any, priority?: MessagePriority): boolean;
+  sendMessage(type: MessageType, payload?: Record<string, Object>, priority?: MessagePriority): boolean;
 
   /**
    * 订阅消息

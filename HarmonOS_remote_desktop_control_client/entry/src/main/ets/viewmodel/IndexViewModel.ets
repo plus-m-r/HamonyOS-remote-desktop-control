@@ -8,6 +8,10 @@
 import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
 import { IAppStateManager } from '../state/IAppStateManager';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'IndexViewModel';
 
 /**
  * Index 页面状态
@@ -102,7 +106,7 @@ export class IndexViewModel {
   private init(): void {
     // 设置设备信息回调
     this.remoteControlService.setDeviceInfoCallback((deviceCode: string, password: string) => {
-      console.info('IndexViewModel: 收到服务器分配的设备信息', deviceCode);
+      hilog.info(DOMAIN, TAG, 'Received device info from server: %{public}s', deviceCode);
 
       // 保存到状态管理器
       this.appStateManager.setUserId(deviceCode);
@@ -129,7 +133,7 @@ export class IndexViewModel {
       waitingForServerInfo: !userId
     });
 
-    console.info('IndexViewModel: Initialized');
+    hilog.info(DOMAIN, TAG, 'Initialized');
   }
 
   /**
@@ -138,7 +142,7 @@ export class IndexViewModel {
   initialize(): void {
     // 初始化逻辑已在构造函数中完成
     // 此方法供页面在 aboutToAppear 中调用
-    console.info('IndexViewModel: initialize called');
+    hilog.info(DOMAIN, TAG, 'Initialize called');
   }
 
   /**
@@ -203,7 +207,7 @@ export class IndexViewModel {
       return true;
 
     } catch (error) {
-      console.error('IndexViewModel: 连接失败', error);
+      hilog.error(DOMAIN, TAG, 'Connection failed: %{public}s', error instanceof Error ? error.message : String(error));
       this.updateState({
         isConnecting: false,
         errorMessage: String(error)
@@ -376,7 +380,7 @@ export class IndexViewModel {
       try {
         callback(this.copyState(this.state));
       } catch (error) {
-        console.error('IndexViewModel: State listener error', error);
+        hilog.error(DOMAIN, TAG, 'State listener error: %{public}s', error instanceof Error ? error.message : String(error));
       }
     });
   }
@@ -388,6 +392,6 @@ export class IndexViewModel {
     this.stateListeners.clear();
     this.navigationCallback = null;
     this.toastCallback = null;
-    console.info('IndexViewModel: Disposed');
+    hilog.info(DOMAIN, TAG, 'Disposed');
   }
 }

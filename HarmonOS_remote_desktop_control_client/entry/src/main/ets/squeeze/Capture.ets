@@ -139,7 +139,7 @@ export class Capture {
 
   /**
    * 处理8位灰度数据，转换为32位RGBA格式
-   * 与Java客户端一致：保持灰度值，A通道设为255（不透明）
+   * 与Java端一致：灰度值扩展到R、G、B通道，A通道设为255（不透明）
    */
   private processGrayData(
     buffer: Uint8Array,
@@ -156,12 +156,11 @@ export class Capture {
       for (let x = 0; x < tileWidth; x++) {
         if (srcPos < src.length) {
           // 将8位灰度值转换为32位RGBA格式
-          // 灰度值同时设置到R、G、B通道，A通道设为255（不透明）
           const grayValue = src[srcPos++];
           buffer[destPos] = grayValue;     // R
           buffer[destPos + 1] = grayValue; // G
           buffer[destPos + 2] = grayValue; // B
-          buffer[destPos + 3] = 0xff;      // A (与Java客户端一致：设置为不透明)
+          buffer[destPos + 3] = 255;       // A (不透明)
         }
         
         destPos += 4;
@@ -192,124 +191,6 @@ export class Capture {
       // 与Java客户端一致：保持原始数据，不修改透明度
       buffer.set(src.subarray(srcPos, srcPos + rowSize), destPos);
       destPos += capWidthByteSize;
-    }
-  }
-
-  /**
-   * 保存所有瓦片数据到文件中，用于与Java客户端数据对比
-   */
-  async saveAllTilesData(): Promise<void> {
-    try {
-      // 确保数据目录存在
-      const dataDir: string = 'data';
-      
-      try {
-        fs.accessSync(dataDir);
-      } catch {
-        fs.mkdirSync(dataDir, true);
-      }
-
-      // 保存捕获信息
-      const info: CaptureInfo = {
-        id: this.id,
-        reset: this.reset,
-        width: this.width,
-        height: this.height,
-        tileWidth: this.tileWidth,
-        tileHeight: this.tileHeight,
-        dirtyTilesCount: this.dirtyTiles.length
-      };
-      const infoFile: string = dataDir + `/harmony_capture_${this.id}_info.txt`;
-      const file = fs.openSync(infoFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-      fs.writeSync(file.fd, JSON.stringify(info, null, 2));
-      fs.closeSync(file);
-      logManager.consoleLog(`[数据保存] 保存捕获信息到 ${infoFile}`);
-
-      // 保存每个瓦片数据
-      let tileIndex: number = 0;
-      for (const tile of this.dirtyTiles) {
-        if (tile !== null && tile !== undefined && tile.capture !== null) {
-          const tileData: Uint8Array = tile.capture.getInternal();
-          const tileFile: string = dataDir + `/harmony_tile_${this.id}_${tileIndex}.bin`;
-          const file = fs.openSync(tileFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-          fs.writeSync(file.fd, tileData.buffer);
-          fs.closeSync(file);
-          logManager.consoleLog(`[数据保存] 保存瓦片 ${tileIndex} 到 ${tileFile}`);
-        }
-        tileIndex++;
-      }
-
-      logManager.consoleLog(`[数据保存] 完成保存 ${this.dirtyTiles.length} 个瓦片`);
-    } catch (error) {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Failed to save tiles data: %{public}s', error);
-    }
-  }
-
-  /**
-   * 保存渲染前后的完整图像数据
-   */
-  async saveRenderedImages(beforeBuffer: Uint8Array, afterBuffer: Uint8Array): Promise<void> {
-    try {
-      // 确保数据目录存在
-      const dataDir: string = 'data';
-      
-      try {
-        fs.accessSync(dataDir);
-      } catch {
-        fs.mkdirSync(dataDir, true);
-      }
-
-      // 保存渲染前图像
-      if (beforeBuffer.length > 0) {
-        const beforeFile: string = dataDir + `/harmony_before_draw_${this.id}.raw`;
-        const file = fs.openSync(beforeFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-        fs.writeSync(file.fd, beforeBuffer.buffer);
-        fs.closeSync(file);
-        logManager.consoleLog(`[数据保存] 保存渲染前图像到 ${beforeFile}`);
-      }
-
-      // 保存渲染后图像
-      if (afterBuffer.length > 0) {
-        const afterFile: string = dataDir + `/harmony_after_draw_${this.id}.raw`;
-        const file = fs.openSync(afterFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-        fs.writeSync(file.fd, afterBuffer.buffer);
-        fs.closeSync(file);
-        logManager.consoleLog(`[数据保存] 保存渲染后图像到 ${afterFile}`);
-      }
-    } catch (error) {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Failed to save rendered images: %{public}s', error);
-    }
-  }
-
-  /**
-   * 保存渲染统计信息
-   */
-  async saveRenderStats(processedTiles: number, skippedTiles: number, renderTime: number): Promise<void> {
-    try {
-      // 确保数据目录存在
-      const dataDir: string = 'data';
-      
-      try {
-        fs.accessSync(dataDir);
-      } catch {
-        fs.mkdirSync(dataDir, true);
-      }
-
-      // 保存渲染统计信息
-      const stats: RenderStats = {
-        id: this.id,
-        processedTiles: processedTiles,
-        skippedTiles: skippedTiles,
-        renderTime: renderTime,
-        totalTiles: this.dirtyTiles.length
-      };
-      const statsFile: string = dataDir + `/harmony_render_stats_${this.id}.json`;
-      const file = fs.openSync(statsFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-      fs.writeSync(file.fd, JSON.stringify(stats, null, 2));
-      fs.closeSync(file);
-      logManager.consoleLog(`[数据保存] 保存渲染统计信息到 ${statsFile}`);
-    } catch (error) {
-      logManager.error(PERF_DOMAIN, PERF_TAG, 'Failed to save render stats: %{public}s', error);
     }
   }
 }

@@ -52,6 +52,14 @@ export interface ControlViewModelDependencies {
 }
 
 /**
+ * 坐标点接口
+ */
+interface CoordinatePoint {
+  x: number;
+  y: number;
+}
+
+/**
  * Toast 回调类型
  */
 export type ToastCallback = (message: string, duration?: number) => void;
@@ -289,10 +297,18 @@ export class ControlViewModel {
       (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
         hilog.info(DOMAIN, TAG, '收到屏幕数据: width=%{public}d, height=%{public}d, size=%{public}d bytes, timestamp=%{public}d', 
           width, height, data.byteLength, timestamp);
+        this.updateState({
+          screenWidth: width,
+          screenHeight: height
+        });
         // 在主线程创建 PixelMap
         this.createPixelMapOnMainThread(data, width, height);
       }
     );
+    
+    // 启动性能监控
+    this.dependencies.remoteControlService.getPerformanceMonitor().start();
+    hilog.info(DOMAIN, TAG, 'Performance monitoring enabled');
 
     // 检查当前连接状态
     const currentState = this.dependencies.remoteControlService.getConnectionState();
@@ -483,11 +499,42 @@ export class ControlViewModel {
    */
   private sendMouseControl(x: number, y: number, button: number): void {
     try {
-      this.dependencies.remoteControlService.sendMouseControl(x, y, button, undefined);
-      hilog.debug(DOMAIN, TAG, '发送鼠标控制 - x: %{public}d, y: %{public}d, button: %{public}d', x, y, button);
+      const remotePoint = this.mapLocalToRemoteCoordinate(x, y);
+      this.dependencies.remoteControlService.sendMouseControl(remotePoint.x, remotePoint.y, button, undefined);
+      hilog.debug(DOMAIN, TAG, '发送鼠标控制 - localX: %{public}d, localY: %{public}d, remoteX: %{public}d, remoteY: %{public}d, button: %{public}d',
+        x, y, remotePoint.x, remotePoint.y, button);
     } catch (error) {
       hilog.error(DOMAIN, TAG, '发送鼠标控制失败: %{public}s', JSON.stringify(error));
     }
+  }
+
+  /**
+   * 将本地触摸坐标映射为远端屏幕坐标
+   * 说明：当前页面使用 ImageFit.Contain 显示远程画面，因此这里先按缩放比例进行反向换算，
+   * 再按远端屏幕尺寸做边界裁剪，避免越界坐标发送到服务端。
+   */
+  private mapLocalToRemoteCoordinate(localX: number, localY: number): CoordinatePoint {
+    const scale = this.state.currentScale > 0 ? this.state.currentScale : 1.0;
+
+    let remoteX = Math.round(localX / scale);
+    let remoteY = Math.round(localY / scale);
+
+    const remoteWidth = this.state.screenWidth > 0 ? this.state.screenWidth : Number.MAX_SAFE_INTEGER;
+    const remoteHeight = this.state.screenHeight > 0 ? this.state.screenHeight : Number.MAX_SAFE_INTEGER;
+
+    if (remoteWidth !== Number.MAX_SAFE_INTEGER) {
+      remoteX = Math.max(0, Math.min(remoteWidth - 1, remoteX));
+    } else {
+      remoteX = Math.max(0, remoteX);
+    }
+
+    if (remoteHeight !== Number.MAX_SAFE_INTEGER) {
+      remoteY = Math.max(0, Math.min(remoteHeight - 1, remoteY));
+    } else {
+      remoteY = Math.max(0, remoteY);
+    }
+
+    return { x: remoteX, y: remoteY };
   }
 
   /**

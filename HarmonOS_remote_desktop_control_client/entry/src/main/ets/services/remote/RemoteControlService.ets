@@ -5,7 +5,8 @@
  * - ConnectionManager: 管理 TCP 连接
  * - ProtocolHandler: 处理协议解析（只解析命令）
  * - HeartbeatManager: 管理心跳
- * - CaptureProcessor: 帧合并逻辑（在主线程）
+ * - CaptureCache: 帧缓存与合并逻辑（在主线程）
+ * - ImageAssembler: 图像组装（在 Worker 线程）
  * - WorkerRepository: 任务发送到 Worker 线程
  */
 
@@ -32,7 +33,6 @@ import { CompressionConfig } from '../../network/CmdCodec';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../interfaces/IHeartbeatManager';
 import { IWorkerRepository, FrameProcessTask, FrameProcessResult } from '../../repository/IWorkerRepository';
-import { CaptureProcessor, FrameProcessResult as CaptureFrameProcessResult, FrameInfo } from '../../processor/CaptureProcessor';
 import { CmdCodec } from '../../network/CmdCodec';
 import { ConcreteCmd } from '../../models/ConcreteCmd';
 import { CmdType } from '../../models/CmdProtocol';
@@ -44,6 +44,7 @@ import { Capture } from '../../squeeze/Capture';
 import { CaptureCache } from '../../squeeze/CaptureCache';
 import { ImageAssemblerImpl } from '../../squeeze/ImageAssemblerImpl';
 import { ChecksumUtils } from '../../utils/ChecksumUtils';
+import { PerformanceMonitor } from '../../utils/PerformanceMonitor';
 import { DependencyContainer, DependencyKeys } from '../../utils/DependencyContainer';
 import hilog from '@ohos.hilog';
 import fs from '@ohos.file.fs';
@@ -85,8 +86,7 @@ export class RemoteControlService implements IRemoteControlService {
   private heartbeatManager: IHeartbeatManager;
   private workerRepository: IWorkerRepository;
 
-  // 帧处理器
-  private captureProcessor: CaptureProcessor = new CaptureProcessor();
+  // 帧组装器
   private imageAssembler: ImageAssemblerImpl = new ImageAssemblerImpl();
 
   // Capture 缓存（用于存储处理后的Capture对象）
@@ -109,6 +109,12 @@ export class RemoteControlService implements IRemoteControlService {
   private isProcessingData: boolean = false;
   private readonly maxDataQueueSize: number = 32;
   private droppedDataQueueCount: number = 0;
+  
+  // 性能监控
+  private performanceMonitor: PerformanceMonitor = PerformanceMonitor.getInstance();
+  
+  // 帧接收时间戳（用于计算精确的帧延迟）
+  private frameReceiveTimestamp: number = 0;
 
   // 设备信息
   private localDeviceCode: string = '';
@@ -280,7 +286,6 @@ export class RemoteControlService implements IRemoteControlService {
 
   async disconnect(): Promise<void> {
     this.stopHeartbeat();
-    this.captureProcessor.reset();
     this.imageAssembler.reset();
     this.dataQueue = [];
     this.isProcessingData = false;
@@ -318,7 +323,6 @@ export class RemoteControlService implements IRemoteControlService {
     this.videoConfig.enabled = false;
     this.remoteDeviceCode = '';
     this.remotePassword = '';
-    this.captureProcessor.reset();
     this.imageAssembler.reset();
     this.dataQueue = [];
     this.isProcessingData = false;
@@ -444,10 +448,17 @@ export class RemoteControlService implements IRemoteControlService {
     this.connectionManager.cleanup();
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
-    this.captureProcessor.reset();
     this.imageAssembler.destroy();
     this.captureCache.clear();
+    this.performanceMonitor.stop();
     hilog.info(DOMAIN, TAG, 'Service cleaned up');
+  }
+  
+  /**
+   * 获取性能监控器实例
+   */
+  getPerformanceMonitor(): PerformanceMonitor {
+    return this.performanceMonitor;
   }
 
   // ========== 私有方法 ==========
@@ -511,7 +522,6 @@ export class RemoteControlService implements IRemoteControlService {
     if (status === 'OK') {
       hilog.info(DOMAIN, TAG, 'Remote screen capture started');
       this.videoConfig.enabled = true;
-      this.captureProcessor.reset();
       this.imageAssembler.reset();
       this.captureCache.clear();
       // TileCache 将通过 CompressorConfig 命令配置
@@ -527,20 +537,13 @@ export class RemoteControlService implements IRemoteControlService {
    */
   private handleCaptureConfigCommand(cmd: ConcreteCmd): void {
     const data = cmd.getData();
-    const width = data.width || 0;
-    const height = data.height || 0;
     const fps = data.fps || 0;
     const captureFrequency = data.captureFrequency || 0;
     const quality = data.quality || 0;
     const maxFps = data.maxFps || 0;
 
-    hilog.info(DOMAIN, TAG, 'CaptureConfig - width: %{public}d, height: %{public}d, fps: %{public}d, captureFrequency: %{public}d, quality: %{public}d, maxFps: %{public}d', 
-      width, height, fps, captureFrequency, quality, maxFps);
-    
-    // 重置帧处理器以适配新配置
-    if (width > 0 && height > 0) {
-      this.captureProcessor.reset();
-    }
+    hilog.info(DOMAIN, TAG, 'CaptureConfig - fps: %{public}d, captureFrequency: %{public}d, quality: %{public}d, maxFps: %{public}d', 
+      fps, captureFrequency, quality, maxFps);
   }
 
   /**
@@ -727,9 +730,6 @@ export class RemoteControlService implements IRemoteControlService {
    * @param data 压缩的视频数据
    * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
    */
-  private isFirstFrame: boolean = true; // 设置为 true 启用调试保存
-  private saveDataCounter: number = 0;
-  private readonly DEBUG_SAVE_FIRST_FRAME: boolean = false; // 控制是否保存第一帧数据
   private skippedNoPreCaptureCount: number = 0;
   private skippedIncompleteNoBufferCount: number = 0;
   private consecutiveSkipCount: number = 0;
@@ -794,6 +794,9 @@ export class RemoteControlService implements IRemoteControlService {
     compressionMethod: number = 3,
     compressionConfig?: CompressionConfig
   ): Promise<void> {
+    // 记录帧接收时间，用于计算精确的帧延迟
+    this.frameReceiveTimestamp = Date.now();
+    
     hilog.debug(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
       data.byteLength, compressionMethod);
 
@@ -821,18 +824,7 @@ export class RemoteControlService implements IRemoteControlService {
       const cacheMaxSize = compressionConfig ? compressionConfig.cacheMaxSize : this.compressorCacheMaxSize;
       const cachePurgeSize = compressionConfig ? compressionConfig.cachePurgeSize : this.compressorCachePurgeSize;
       compressor.setTileCacheConfig(useCache, cacheMaxSize, cachePurgeSize);
-      let capture: Capture = await compressor.decompress(zippedData);
-      
-      // 检查缓存中是否存在相同ID的Capture
-      const cachedCapture = this.captureCache.get(capture.id);
-      if (cachedCapture) {
-        hilog.debug(DOMAIN, TAG, 'Capture cache hit for id: %{public}d', capture.id);
-        capture = cachedCapture;
-      } else {
-        // 将新的Capture添加到缓存
-        this.captureCache.add(capture);
-        hilog.debug(DOMAIN, TAG, 'Capture cache miss, added to cache: %{public}d', capture.id);
-      }
+      const capture: Capture = await compressor.decompress(zippedData);
       
       // 使用 preCapture 作为完整帧基线：增量帧只覆盖变化瓦片
       const currentCapture = capture;
@@ -845,19 +837,15 @@ export class RemoteControlService implements IRemoteControlService {
         existingPreCapture.tileWidth === currentCapture.tileWidth &&
         existingPreCapture.tileHeight === currentCapture.tileHeight;
 
-      if (canMergeToPreCapture) {
-        const pre = existingPreCapture as Capture;
-        for (let i = 0; i < currentCapture.dirtyTiles.length; i++) {
-          const tile = currentCapture.dirtyTiles[i];
-          if (tile !== null && tile.capture !== null) {
-            pre.dirtyTiles[i] = tile;
-          }
-        }
-      } else {
+      if (!canMergeToPreCapture) {
+        // 重置或尺寸变化，设置新的preCapture
         this.captureCache.setPreCapture(currentCapture);
+      } else {
+        // 所有增量帧都加入pending队列，由processIncompleteCaptures统一处理
+        this.captureCache.addPending(currentCapture);
       }
 
-      // 接入不完整帧补全逻辑，返回当前基线是否完整
+      // 统一处理：从pending队列合并到preCapture（支持自适应批处理）
       const adaptiveBatch = this.getAdaptiveIncompleteBatchSize();
       const isPreCaptureComplete = this.captureCache.processIncompleteCaptures(adaptiveBatch);
 
@@ -890,75 +878,27 @@ export class RemoteControlService implements IRemoteControlService {
       const cId = currentCapture.id;
       const cReset = currentCapture.reset;
 
-      // 2. 处理帧前的 Capture 信息保存
-      
-      // 保存第一帧的所有步骤数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
-      if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
-        const timestamp = Date.now();
-
-        // 1. 保存原始压缩数据（步骤1）
-        await this.saveArrayBufferToFile(`data/step1_raw_${timestamp}.bin`, data);
-
-        // 5. 保存解压后的 Capture 信息（步骤2）
-        const captureInfo: CaptureInfo = {
-          id: currentCapture.id,
-          reset: currentCapture.reset,
-          width: assembleResult.width,
-          height: assembleResult.height,
-          tileWidth: renderCapture.tileWidth,
-          tileHeight: renderCapture.tileHeight,
-          dirtyTilesCount: renderCapture.dirtyTiles.filter((t) => t !== null).length
-        };
-        await this.saveJsonToFile(`data/step2_capture_info_${this.saveDataCounter}_${timestamp}.json`, captureInfo);
-        this.saveDataCounter++;
-
-        // 6. 保存第一个瓦片的原始数据（如果有）
-        const firstDirtyTile = renderCapture.dirtyTiles.find(t => t !== null);
-        if (firstDirtyTile && firstDirtyTile.capture) {
-          await this.saveArrayBufferToFile(`data/step3_first_tile_data_${timestamp}.bin`, firstDirtyTile.capture.getInternal().buffer as ArrayBuffer);
-        }
-      }
-
-      // 3. 保存组装后的缓冲区（仅用于调试首帧）
-      if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
-        const timestamp = Date.now();
-        await this.saveArrayBufferToFile(`data/step5_after_draw_${timestamp}.raw`, assembleResult.pixelBuffer.buffer as ArrayBuffer);
-      }
-
-      // 4. 处理帧
-      const frameInfo: FrameInfo = {
-        id: cId,
-        reset: cReset,
-        width: assembleResult.width,
-        height: assembleResult.height
-      };
-
-      const frameResult: CaptureFrameProcessResult = this.captureProcessor.processFrame(assembleResult.pixelBuffer, frameInfo);
-
-      // 保存第一帧的最终处理数据（仅在 DEBUG_SAVE_FIRST_FRAME 为 true 时执行）
-      if (this.DEBUG_SAVE_FIRST_FRAME && this.isFirstFrame) {
-        const timestamp = Date.now();
-        // 12. 保存处理后的最终图像数据（步骤6）
-        await this.saveArrayBufferToFile(`data/step6_final_image_${timestamp}.raw`, frameResult.buffer.buffer as ArrayBuffer);
-        
-        // 标记第一帧已处理
-        this.isFirstFrame = false;
-      }
-
+      // 直接使用组装结果，不需要CaptureProcessor中间层（与Java端一致）
       if (this.screenCallback) {
         // 直接调用 screenCallback，由 ViewModel 创建 PixelMap
-        const uint8Data = frameResult.buffer;
+        const uint8Data = assembleResult.pixelBuffer;
         const bufferData: ArrayBuffer = uint8Data.buffer.slice(uint8Data.byteOffset, uint8Data.byteOffset + uint8Data.byteLength);
-        const widthVal: number = frameResult.width;
-        const heightVal: number = frameResult.height;
+        const widthVal: number = assembleResult.width;
+        const heightVal: number = assembleResult.height;
         
         try {
+          const renderTimestamp = Date.now();
           this.screenCallback(
             bufferData,
             widthVal,
             heightVal,
-            Date.now()
+            renderTimestamp
           );
+          
+          // 计算精确的帧延迟（从接收到渲染的时间）
+          const frameDelay = renderTimestamp - this.frameReceiveTimestamp;
+          this.performanceMonitor.recordFrame(frameDelay);
+          
           this.resetConsecutiveSkipIfNeeded(widthVal, heightVal);
           this.renderedFrameCount++;
           if (this.renderedFrameCount <= 3 || this.renderedFrameCount % 120 === 0) {
@@ -979,64 +919,6 @@ export class RemoteControlService implements IRemoteControlService {
       if (error instanceof Error && error.stack) {
         hilog.error(DOMAIN, TAG, 'Error stack: %{public}s', error.stack);
       }
-    }
-  }
-
-  /**
-   * 保存 ArrayBuffer 到文件
-   */
-  private async saveArrayBufferToFile(filePath: string, buffer: ArrayBuffer): Promise<void> {
-    try {
-      // 使用 HarmonyOS 的文件 API 保存文件
-      const context: common.Context = GlobalContext.getContext().getObject("context") as common.Context;
-      const filesDir: string = context.filesDir;
-      const fullPath: string = filesDir + '/' + filePath;
-      
-      // 确保目录存在
-      const dirPath: string = fullPath.substring(0, fullPath.lastIndexOf('/'));
-      try {
-        fs.mkdirSync(dirPath, true);
-      } catch (e) {
-        // 目录可能已存在，忽略错误
-      }
-      
-      // 写入文件
-      const file = await fs.openSync(fullPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
-      await fs.writeSync(file.fd, buffer);
-      await fs.closeSync(file.fd);
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to save ArrayBuffer to file: %{public}s', error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  /**
-   * 保存 JSON 到文件
-   */
-  private async saveJsonToFile(filePath: string, data: object): Promise<void> {
-    try {
-      // 使用 HarmonyOS 的文件 API 保存文件
-      const context: common.Context = GlobalContext.getContext().getObject("context") as common.Context;
-      const filesDir: string = context.filesDir;
-      const fullPath: string = filesDir + '/' + filePath;
-      
-      // 确保目录存在
-      const dirPath: string = fullPath.substring(0, fullPath.lastIndexOf('/'));
-      try {
-        fs.mkdirSync(dirPath, true);
-      } catch (e) {
-        // 目录可能已存在，忽略错误
-      }
-      
-      // 写入文件
-      const jsonString: string = JSON.stringify(data, null, 2);
-      const encoder: util.TextEncoder = new util.TextEncoder();
-      const jsonBuffer: Uint8Array = encoder.encodeInto(jsonString);
-      
-      const file = await fs.openSync(fullPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
-      await fs.writeSync(file.fd, jsonBuffer.buffer);
-      await fs.closeSync(file.fd);
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Failed to save JSON to file: %{public}s', error instanceof Error ? error.message : String(error));
     }
   }
 

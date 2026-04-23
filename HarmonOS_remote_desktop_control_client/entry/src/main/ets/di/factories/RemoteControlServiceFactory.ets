@@ -13,6 +13,10 @@ import { IWorkerRepository } from '../../repository/IWorkerRepository';
 import { configCenter } from '../../config/config';
 import { Injector, ServiceKeys } from '../Injector';
 import { HeartbeatManager } from '../../services/heartbeat/HeartbeatManager';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'RemoteControlServiceFactory';
 
 /**
  * 远程控制服务工厂
@@ -56,7 +60,7 @@ export class RemoteControlServiceFactory {
       workerRepository
     );
 
-    console.info('RemoteControlServiceFactory: Service created');
+    hilog.info(DOMAIN, TAG, 'Service created');
     
     return service;
   }

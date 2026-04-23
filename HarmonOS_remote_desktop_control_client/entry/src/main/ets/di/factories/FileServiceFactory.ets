@@ -5,6 +5,10 @@ import { FileService } from '../../services/file/FileService';
 import { IFileService } from '../../services/interfaces/IFileService';
 import { configCenter } from '../../config/config';
 import { HttpRepositoryImpl } from '../../repository/HttpRepositoryImpl';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'FileServiceFactory';
 
 /**
  * 文件服务工厂
@@ -32,7 +36,7 @@ export class FileServiceFactory {
       maxFileSize: 1024 * 1024 * 1024 // 1GB
     });
 
-    console.info('FileServiceFactory: Service created');
+    hilog.info(DOMAIN, TAG, 'Service created');
 
     return service;
   }

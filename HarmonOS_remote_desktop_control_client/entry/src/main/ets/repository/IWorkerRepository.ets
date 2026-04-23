@@ -37,7 +37,7 @@ export interface TileData {
 }
 
 /**
- * 帧处理结果（帧合并由主线程 CaptureProcessor 完成）
+ * 帧处理结果（帧合并由主线程 CaptureCache 完成）
  */
 export interface FrameProcessResult {
   imageBuffer: ArrayBuffer;

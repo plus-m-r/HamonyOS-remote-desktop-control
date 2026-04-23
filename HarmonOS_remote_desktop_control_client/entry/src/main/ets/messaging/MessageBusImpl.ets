@@ -91,7 +91,7 @@ export class MessageBusImpl implements IMessageBus {
     }
   }
 
-  sendMessage(type: MessageType, payload?: any, priority: MessagePriority = MessagePriority.NORMAL): boolean {
+  sendMessage(type: MessageType, payload?: Record<string, Object>, priority: MessagePriority = MessagePriority.NORMAL): boolean {
     const message: IMessage = {
       type,
       id: this.generateMessageId(),

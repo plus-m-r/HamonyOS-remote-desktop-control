@@ -23,14 +23,7 @@ export class DependencyInitializer {
       DependencyKeys.CAPTURE_CACHE,
       () => {
         const runtimeConfig = configCenter.getCaptureCacheRuntimeConfig();
-        const captureCache = new CaptureCache(runtimeConfig.maxSize, runtimeConfig.purgeSize, {
-          queueMaxSize: runtimeConfig.queueMaxSize,
-          queueMaxBytes: runtimeConfig.queueMaxBytes,
-          queueLowWatermarkBytes: runtimeConfig.queueLowWatermarkBytes,
-          queueHighWatermarkBytes: runtimeConfig.queueHighWatermarkBytes,
-          pressureStartRatio: runtimeConfig.pressureStartRatio,
-          pressureDropDirtyTileRatio: runtimeConfig.pressureDropDirtyTileRatio
-        });
+        const captureCache = new CaptureCache(runtimeConfig.maxSize, runtimeConfig.purgeSize);
         hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton with lifecycle support');
         return captureCache;
       },

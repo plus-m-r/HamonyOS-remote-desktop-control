@@ -231,9 +231,6 @@ export interface ClientInfo {
 }
 
 // ==================== 回调类型 ====================
-// 屏幕数据回调
-export type ScreenCallback = (data: ArrayBuffer, width: number, height: number, timestamp: number) => void;
-
 // 客户端信息回调
 export type ClientInfoCallback = (info: ClientInfo) => void;
 

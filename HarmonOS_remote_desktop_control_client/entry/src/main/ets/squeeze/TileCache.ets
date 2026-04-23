@@ -37,21 +37,9 @@ export class NullTileCache implements TileCache {
   }
 }
 
-class CacheEntry {
-  readonly tile: CaptureTile;
-  readonly id: number;
-  lastUsed: number;
-
-  constructor(tile: CaptureTile, id: number) {
-    this.tile = tile;
-    this.id = id;
-    this.lastUsed = Date.now();
-  }
-}
-
 export class RegularTileCache implements TileCache {
-  private cache: Map<number, CacheEntry> = new Map();
-  private nextId: number = 0;
+  private tiles: Map<number, CaptureTile> = new Map();
+  private lru: number[] = []; // LRU队列，头部是最久未使用的
   private hits: number = 0;
   private readonly maxSize: number;
   private readonly purgeSize: number;
@@ -62,46 +50,62 @@ export class RegularTileCache implements TileCache {
   }
 
   getCacheId(tile: CaptureTile): number {
-    const entries = Array.from(this.cache.entries());
-    for (let i = 0; i < entries.length; i++) {
-      const id = entries[i][0];
-      const entry = entries[i][1];
-      if (entry.tile.checksum === tile.checksum) {
-        entry.lastUsed = Date.now();
-        return id;
-      }
+    // 与Java端一致：直接使用checksum作为cacheId
+    const cs = tile.checksum;
+    if (cs < 0 || cs > 4294967295) {
+      // checksum超出int范围时截断（与Java端警告一致）
+      return Math.floor(cs & 0xFFFFFFFF);
     }
-    return -1;
+    return cs;
   }
 
   add(tile: CaptureTile): void {
-    if (this.cache.size >= this.maxSize) {
-      this.purge();
+    // 与Java端一致：只有缓存未满时才添加
+    if (this.tiles.size < this.maxSize) {
+      const cacheId = this.getCacheId(tile);
+      this.tiles.set(cacheId, tile);
+      // 添加到LRU队列头部（最新使用）
+      this.lru.unshift(cacheId);
     }
-    const id = this.nextId++;
-    this.cache.set(id, new CacheEntry(tile, id));
   }
 
   get(cachedId: number): CaptureTile {
-    const entry = this.cache.get(cachedId);
-    if (entry !== undefined) {
-      entry.lastUsed = Date.now();
+    const tile = this.tiles.get(cachedId);
+    if (tile !== undefined) {
       this.hits++;
-      return entry.tile;
+      // 与Java端一致：命中时移动到LRU队列头部
+      const index = this.lru.indexOf(cachedId);
+      if (index !== -1) {
+        this.lru.splice(index, 1);
+        this.lru.unshift(cachedId);
+      }
+      return tile;
     }
     return CaptureTile.MISSING;
   }
 
   size(): number {
-    return this.cache.size;
+    return this.tiles.size;
   }
 
   clear(): void {
-    this.cache.clear();
+    this.tiles.clear();
+    this.lru = [];
     this.hits = 0;
   }
 
-  onCaptureProcessed(): void {}
+  onCaptureProcessed(): void {
+    // 与Java端完全一致的LRU清理逻辑
+    if (this.tiles.size > 0 && this.tiles.size >= this.maxSize) {
+      // 从LRU队列头部移除最久未使用的条目，直到缓存大小降至purgeSize
+      while (this.tiles.size > this.purgeSize && this.lru.length > 0) {
+        const oldestId = this.lru.shift(); // 移除并返回第一个元素
+        if (oldestId !== undefined) {
+          this.tiles.delete(oldestId);
+        }
+      }
+    }
+  }
 
   clearHits(): void {
     this.hits = 0;
@@ -109,14 +113,5 @@ export class RegularTileCache implements TileCache {
 
   getHits(): number {
     return this.hits;
-  }
-
-  private purge(): void {
-    const entries = Array.from(this.cache.values());
-    entries.sort((a, b) => a.lastUsed - b.lastUsed);
-    const toRemove = Math.min(this.purgeSize, entries.length);
-    for (let i = 0; i < toRemove; i++) {
-      this.cache.delete(entries[i].id);
-    }
   }
 }

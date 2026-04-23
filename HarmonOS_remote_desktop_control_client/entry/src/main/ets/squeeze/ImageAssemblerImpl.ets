@@ -6,6 +6,10 @@
 
 import { IImageAssembler, AssemblerConfig, AssembleResult } from './IImageAssembler';
 import { Capture } from './Capture';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'ImageAssemblerImpl';
 
 export class ImageAssemblerImpl implements IImageAssembler {
   private config: AssemblerConfig | null = null;
@@ -18,15 +22,10 @@ export class ImageAssemblerImpl implements IImageAssembler {
   init(config: AssemblerConfig): void {
     this.config = config;
     this.isInitialized = true;
-    console.debug('ImageAssemblerImpl: Initialized');
+    hilog.debug(DOMAIN, TAG, 'Initialized');
   }
 
-  async assemble(
-    capture: Capture,
-    prevBuffer?: Uint8Array | null,
-    prevWidth?: number,
-    prevHeight?: number
-  ): Promise<AssembleResult> {
+  async assemble(capture: Capture): Promise<AssembleResult> {
     if (!this.isInitialized || !this.config) {
       throw new Error('Assembler not initialized');
     }
@@ -38,17 +37,14 @@ export class ImageAssemblerImpl implements IImageAssembler {
       let widthToUse: number = 0;
       let heightToUse: number = 0;
 
-      // 优先使用传入的前一帧，其次使用内部缓存的前一帧
-      if (this.config.enableBufferReuse) {
-        if (prevBuffer && prevWidth === capture.width && prevHeight === capture.height) {
-          bufferToUse = prevBuffer;
-          widthToUse = prevWidth;
-          heightToUse = prevHeight;
-        } else if (this.prevBuffer && this.prevWidth === capture.width && this.prevHeight === capture.height) {
-          bufferToUse = this.prevBuffer;
-          widthToUse = this.prevWidth;
-          heightToUse = this.prevHeight;
-        }
+      // 使用内部缓存的前一帧缓冲区
+      if (this.config.enableBufferReuse && 
+          this.prevBuffer && 
+          this.prevWidth === capture.width && 
+          this.prevHeight === capture.height) {
+        bufferToUse = this.prevBuffer;
+        widthToUse = this.prevWidth;
+        heightToUse = this.prevHeight;
       }
 
       // 使用 Capture.createImageBuffer 组装
@@ -75,7 +71,7 @@ export class ImageAssemblerImpl implements IImageAssembler {
       };
 
     } catch (error) {
-      console.error('ImageAssemblerImpl: Assemble failed', error);
+      hilog.error(DOMAIN, TAG, 'Assemble failed: %{public}s', error instanceof Error ? error.message : String(error));
       throw new Error(error instanceof Error ? error.message : String(error));
     }
   }
@@ -88,35 +84,19 @@ export class ImageAssemblerImpl implements IImageAssembler {
       this.prevHeight === height;
   }
 
-  getAverageAssembleTime(): number {
-    if (this.assembleTimes.length === 0) {
-      return 0;
-    }
-    const sum = this.assembleTimes.reduce((a, b) => a + b, 0);
-    return sum / this.assembleTimes.length;
-  }
-
-  releaseBuffer(buffer: Uint8Array): void {
-    // 这里可以实现缓冲区池逻辑
-    // 暂时直接忽略，依赖 GC 清理
-  }
-
   reset(): void {
     this.assembleTimes = [];
     this.prevBuffer = null;
     this.prevWidth = 0;
     this.prevHeight = 0;
-    console.debug('ImageAssemblerImpl: Reset');
+    hilog.debug(DOMAIN, TAG, 'Reset');
   }
 
   destroy(): void {
     this.assembleTimes = [];
-    this.prevBuffer = null;
-    this.prevWidth = 0;
-    this.prevHeight = 0;
     this.config = null;
     this.isInitialized = false;
-    console.debug('ImageAssemblerImpl: Destroyed');
+    hilog.debug(DOMAIN, TAG, 'Destroyed');
   }
 
   private recordAssembleTime(time: number): void {

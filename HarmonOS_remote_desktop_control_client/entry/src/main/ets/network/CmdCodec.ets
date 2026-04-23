@@ -1320,8 +1320,8 @@ export class CmdCodec {
 
       console.log(`CmdCodec: Decoded Capture command - id: ${id}, compressionMethod: ${compressionMethodOrdinal}, payloadSize: ${payloadLength}, hasConfig: ${hasCompressionConfig}`);
 
-      // 创建命令对象
-      return CmdUtils.createCaptureDataCmd(imageData, 0, 0, compressionMethodOrdinal, compressionConfig);
+      // 创建命令对象（不需要width和height，它们从解压后的Capture获取）
+      return CmdUtils.createCaptureDataCmd(imageData, compressionMethodOrdinal, compressionConfig);
     } catch (error) {
       console.error('CmdCodec: Failed to decode Capture command', error);
       return undefined;
@@ -1897,7 +1897,8 @@ export class CmdCodec {
     height: number,
     compressionMethod: number
   ): ConcreteCmd {
-    return CmdUtils.createCaptureDataCmd(imageData, width, height, compressionMethod);
+    // 注意：CmdUtils.createCaptureDataCmd不需要width和height参数
+    return CmdUtils.createCaptureDataCmd(imageData, compressionMethod);
   }
 
   /**

@@ -8,6 +8,10 @@ import { IFileService } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
 import { IAppStateManager } from '../state/IAppStateManager';
 import { AppStateManager, MemoryStorageImpl } from '../state/AppStateManager';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'ServiceProvider';
 
 /**
  * 服务提供者
@@ -23,7 +27,7 @@ export class ServiceProvider {
    */
   static async initialize(): Promise<void> {
     if (ServiceProvider._injectorInitialized) {
-      console.info('ServiceProvider: Already initialized');
+      hilog.info(DOMAIN, TAG, 'Already initialized');
       return;
     }
 
@@ -34,7 +38,7 @@ export class ServiceProvider {
     ServiceProvider._appStateManager = new AppStateManager(new MemoryStorageImpl());
     
     ServiceProvider._injectorInitialized = true;
-    console.info('ServiceProvider: Initialized');
+    hilog.info(DOMAIN, TAG, 'Initialized');
   }
 
   /**
@@ -103,9 +107,9 @@ export class ServiceProvider {
       
       ServiceProvider._injectorInitialized = false;
       
-      console.info('ServiceProvider: Cleanup completed');
+      hilog.info(DOMAIN, TAG, 'Cleanup completed');
     } catch (error) {
-      console.error('ServiceProvider: Cleanup failed', error);
+      hilog.error(DOMAIN, TAG, 'Cleanup failed: %{public}s', error instanceof Error ? error.message : String(error));
     }
   }
 

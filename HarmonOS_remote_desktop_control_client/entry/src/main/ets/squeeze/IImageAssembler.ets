@@ -48,34 +48,14 @@ export interface IImageAssembler {
   /**
    * 组装图像数据
    * @param capture 图像数据
-   * @param prevBuffer 前一帧缓冲区（可选）
-   * @param prevWidth 前一帧宽度（可选）
-   * @param prevHeight 前一帧高度（可选）
    * @returns Promise<AssembleResult>
    */
-  assemble(
-    capture: Capture,
-    prevBuffer?: Uint8Array | null,
-    prevWidth?: number,
-    prevHeight?: number
-  ): Promise<AssembleResult>;
+  assemble(capture: Capture): Promise<AssembleResult>;
 
   /**
    * 判断当前组装器是否已经持有可复用的上一帧缓冲区
    */
   hasReusableBuffer(width: number, height: number): boolean;
-
-  /**
-   * 获取组装耗时统计
-   * @returns 平均组装耗时（毫秒）
-   */
-  getAverageAssembleTime(): number;
-
-  /**
-   * 释放缓冲区
-   * @param buffer 要释放的缓冲区
-   */
-  releaseBuffer(buffer: Uint8Array): void;
 
   /**
    * 重置组装器状态

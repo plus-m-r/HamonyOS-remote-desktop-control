@@ -8,7 +8,6 @@ export class MemByteBuffer {
   private buffer: Uint8Array;
   private readOffset: number = 0;
   private writeOffset: number = 0;
-  private marks: Map<number, number> = new Map();
 
   constructor(initialCapacity: number = 256) {
     this.buffer = new Uint8Array(initialCapacity);
@@ -31,22 +30,6 @@ export class MemByteBuffer {
       newBuffer.set(this.buffer.subarray(0, this.writeOffset));
       this.buffer = newBuffer;
     }
-  }
-
-  mark(): number {
-    const id = this.marks.size;
-    this.marks.set(id, this.writeOffset);
-    return id;
-  }
-
-  writeLenAsShort(markId: number): void {
-    const markPos = this.marks.get(markId);
-    if (markPos === undefined) {
-      throw new Error('Invalid mark id');
-    }
-    const length = this.writeOffset - markPos - 2;
-    const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + markPos);
-    view.setInt16(0, -length, false);
   }
 
   writeByte(value: number): void {
@@ -133,25 +116,22 @@ export class MemByteBuffer {
     return result;
   }
 
-  /**
-   * 尽力读取最多 length 字节，不抛出异常
-   * 返回实际读取的字节数
-   */
-  readBytesBestEffort(length: number): Uint8Array {
-    const available = this.writeOffset - this.readOffset;
-    const toRead = Math.min(available, length);
-    hilog.debug(DOMAIN, TAG, 'readBytesBestEffort requested: %{public}d, available: %{public}d, toRead: %{public}d', length, available, toRead);
-    const result = this.buffer.subarray(this.readOffset, this.readOffset + toRead);
-    this.readOffset += toRead;
-    return result;
-  }
-
   readAllBytes(): Uint8Array {
     return this.buffer.subarray(0, this.writeOffset);
   }
 
   getInternal(): Uint8Array {
     return this.buffer.subarray(0, this.writeOffset);
+  }
+
+  copyRange(start: number, end: number): Uint8Array {
+    const from = Math.max(0, start);
+    const to = Math.min(this.writeOffset, Math.max(from, end));
+    return this.buffer.slice(from, to);
+  }
+
+  toArray(): Uint8Array {
+    return this.buffer.slice(0, this.writeOffset);
   }
   size(): number {
     return this.writeOffset;
@@ -169,11 +149,17 @@ export class MemByteBuffer {
     this.readOffset = 0;
   }
 
-  fill(count: number, value: number): void {
-    this.ensureCapacity(count);
-    for (let i = 0; i < count; i++) {
-      this.buffer[this.writeOffset++] = value & 0xFF;
+  /**
+   * 填充指定数量的字节
+   * @param len 填充长度
+   * @param value 填充值
+   */
+  fill(len: number, value: number): void {
+    this.ensureCapacity(this.writeOffset + len);
+    for (let i = 0; i < len; i++) {
+      this.buffer[this.writeOffset + i] = value & 0xFF;
     }
+    this.writeOffset += len;
   }
 
   /**

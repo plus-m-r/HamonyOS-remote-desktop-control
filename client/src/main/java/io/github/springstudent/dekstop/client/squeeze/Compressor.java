@@ -1,16 +1,16 @@
 package io.github.springstudent.dekstop.client.squeeze;
 
 
+import java.awt.Dimension;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+
 import io.github.springstudent.dekstop.client.bean.Capture;
 import io.github.springstudent.dekstop.client.bean.CaptureTile;
 import io.github.springstudent.dekstop.common.bean.CompressionMethod;
 import io.github.springstudent.dekstop.common.bean.MemByteBuffer;
 import io.github.springstudent.dekstop.common.log.Log;
-
-import java.awt.*;
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
-import java.io.IOException;
 
 /**
  * 压缩/解压器，支持多种压缩算法

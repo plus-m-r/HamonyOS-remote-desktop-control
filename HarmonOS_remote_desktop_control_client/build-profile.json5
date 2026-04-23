@@ -7,11 +7,11 @@
         "material": {
           "certpath": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001A4C143FBE4F0DE6B35AD12E19E5045B7AB3ABDC31D81990E66B87E704DE255E4E953691329A42",
+          "keyPassword": "0000001BB36B0E9C99199A7B522B047FA79D95EBEEF1D5881B0C41F982CE52C1C34447278DC374C0957E6F",
           "profile": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\20241\\.ohos\\config\\default_HarmonOS_remote_desktop_control_client_8exd9G6UEqELBqXqfJa9HoHpYO59nCAxzynaU4b_fF0=.p12",
-          "storePassword": "0000001A8639980D06ACB51A1C142919103C69A023AB6F613C4FD6A9418A1DF4DA382F034FB758D3A218"
+          "storePassword": "0000001B80FF25CFBA1FD0121B2136055D2C39EB58308DD4D24FEE4F10229B80A83737B89D2AD83D33B7D3"
         }
       },
       {

@@ -37,6 +37,16 @@ public class MemByteBuffer extends OutputStream {
 		return Arrays.copyOf(buffer, count);
 	}
 
+	public byte[] copyRange(int start, int end) {
+		final int from = Math.max(0, start);
+		final int to = Math.min(count, Math.max(from, end));
+		return Arrays.copyOfRange(buffer, from, to);
+	}
+
+	public byte[] toByteArray() {
+		return getInternal();
+	}
+
 	public int mark() {
 		return count;
 	}

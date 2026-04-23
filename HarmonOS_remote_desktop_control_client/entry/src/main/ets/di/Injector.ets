@@ -1,6 +1,7 @@
 // entry/src/main/ets/di/Injector.ets
 // 依赖注入容器 - 完全解耦版本
 
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { IRemoteControlService } from '../services/interfaces/IRemoteControlService';
 import { IFileService } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
@@ -8,6 +9,9 @@ import { IConnectionManager } from '../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../services/protocol/IProtocolHandler';
 import { IWorkerRepository } from '../repository/IWorkerRepository';
 import { BaseService } from './BaseService';
+
+const DOMAIN = 0x0001;
+const TAG = 'Injector';
 
 /**
  * 依赖注入容器
@@ -21,6 +25,9 @@ export class Injector {
   private isInitialized: boolean = false;
 
   private constructor() {}
+  
+  private static readonly DOMAIN = 0x0001;
+  private static readonly TAG = 'Injector';
 
   /**
    * 获取依赖注入容器单例
@@ -116,7 +123,7 @@ export class Injector {
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
-      console.warn('Injector: Already initialized');
+      hilog.warn(DOMAIN, TAG, 'Already initialized');
       return;
     }
 
@@ -124,7 +131,7 @@ export class Injector {
     await this.initializeFactories();
 
     this.isInitialized = true;
-    console.info('Injector: Initialized');
+    hilog.info(DOMAIN, TAG, 'Initialized');
   }
 
   /**
@@ -173,9 +180,9 @@ export class Injector {
         () => FileServiceFactory.create()
       );
 
-      console.info('Injector: All service factories registered');
+      hilog.info(DOMAIN, TAG, 'All service factories registered');
     } catch (error) {
-      console.error('Injector: Failed to initialize factories', error);
+      hilog.error(DOMAIN, TAG, 'Failed to initialize factories: %{public}s', error instanceof Error ? error.message : String(error));
       throw new Error(String(error));
     }
   }

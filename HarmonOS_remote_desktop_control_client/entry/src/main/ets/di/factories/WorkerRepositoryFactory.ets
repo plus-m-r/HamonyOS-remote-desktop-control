@@ -2,6 +2,10 @@
 
 import { WorkerRepositoryImpl } from '../../repository/WorkerRepositoryImpl';
 import { IWorkerRepository } from '../../repository/IWorkerRepository';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN = 0x0001;
+const TAG = 'WorkerRepositoryFactory';
 
 /**
  * Worker仓库工厂
@@ -14,7 +18,7 @@ export class WorkerRepositoryFactory {
    */
   static create(): IWorkerRepository {
     const repository = new WorkerRepositoryImpl();
-    console.info('WorkerRepositoryFactory: WorkerRepository created');
+    hilog.info(DOMAIN, TAG, 'WorkerRepository created');
     return repository;
   }
 }
