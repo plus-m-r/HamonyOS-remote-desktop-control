@@ -5,8 +5,6 @@ import { ServiceProvider } from '../di/ServiceProvider';
 import { promptAction, router } from '@kit.ArkUI';
 import hilog from '@ohos.hilog';
 import { image } from '@kit.ImageKit';
-import { PerformanceOverlay } from '../components/PerformanceOverlay';
-import { PerformanceStats } from '../utils/PerformanceMonitor';
 
 interface RouterParams {
   deviceId?: string;
@@ -40,24 +38,7 @@ struct Control {
   };
 
   // 用于显示远程屏幕画面
-  @State private screenPixelMap: image.PixelMap | null = null;
-  
-  // 性能监控浮窗显示状态
-  @Provide showPerformanceOverlay: boolean = true; // 默认开启
-  @State performanceStats: PerformanceStats = {
-    fps: 0,
-    avgFps: 0,
-    minFps: 0,
-    maxFps: 0,
-    avgFrameDelay: 0,
-    currentFrameDelay: 0,
-    totalFrames: 0,
-    skippedFrames: 0,
-    skipRate: 0
-  };
-  
-  // 性能数据更新定时器
-  private perfUpdateTimer: number | null = null;
+  @State private screenPixelMap: image.PixelMap | undefined = undefined;
 
   constructor() {
     super();
@@ -124,25 +105,28 @@ struct Control {
         hilog.error(DOMAIN, TAG, '获取路由参数失败: %{public}s', JSON.stringify(error));
       }
 
-      // 设置屏幕像素数据回调
+      // ⭐ 设置屏幕像素数据回调
       this.viewModel.setScreenPixelMapCallback((pixelMap: image.PixelMap) => {
-        const previous = this.screenPixelMap;
-        this.screenPixelMap = pixelMap;  // 触发 UI 刷新
-        if (previous && previous !== pixelMap) {
+        const previous: image.PixelMap | undefined = this.screenPixelMap;
+        
+        hilog.debug(DOMAIN, TAG, 'UI 收到新 PixelMap');
+        
+        // ⭐⭐⭐ 关键：直接赋值新的 PixelMap，@State 会自动检测到引用变化
+        this.screenPixelMap = pixelMap;
+        
+        hilog.debug(DOMAIN, TAG, '✅ UI 已绑定新 PixelMap');
+        
+        // 释放旧的 PixelMap
+        if (previous) {
           try {
             previous.release();
+            hilog.debug(DOMAIN, TAG, '旧PixelMap已释放');
           } catch (error) {
-            hilog.warn(DOMAIN, TAG, '释放旧PixelMap失败: %{public}s', JSON.stringify(error));
+            hilog.error(DOMAIN, TAG, '释放旧PixelMap失败: %{public}s', JSON.stringify(error));
           }
         }
       });
       
-      // 启动性能数据更新定时器（每秒更新一次）
-      this.perfUpdateTimer = setInterval(() => {
-        const monitor = ServiceProvider.remoteControlService.getPerformanceMonitor();
-        this.performanceStats = monitor.getStats();
-      }, 1000);
-
       // 设置 UIContext 用于主线程渲染
       const uiContext = this.getUIContext();
       this.viewModel.setUIContext(uiContext);
@@ -156,12 +140,6 @@ struct Control {
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Control页面销毁');
     
-    // 清理性能监控定时器
-    if (this.perfUpdateTimer !== null) {
-      clearInterval(this.perfUpdateTimer);
-      this.perfUpdateTimer = null;
-    }
-    
     this.viewModel.dispose();
     if (this.screenPixelMap) {
       try {
@@ -169,7 +147,7 @@ struct Control {
       } catch (error) {
         hilog.warn(DOMAIN, TAG, '页面销毁释放PixelMap失败: %{public}s', JSON.stringify(error));
       }
-      this.screenPixelMap = null;
+      this.screenPixelMap = undefined;
     }
   }
 
@@ -268,7 +246,7 @@ struct Control {
   buildRemoteScreen() {
     Column() {
       Stack() {
-        // 使用 Image 组件显示远程画面
+        // ⭐ 直接使用 screenPixelMap，@State 会自动检测引用变化
         if (this.screenPixelMap) {
           Image(this.screenPixelMap)
             .width('100%')
@@ -283,11 +261,6 @@ struct Control {
             .backgroundColor('#808080')
         }
         
-        // 性能监控浮窗
-        if (this.showPerformanceOverlay) {
-          PerformanceOverlay({ stats: this.performanceStats })
-        }
-
         // 拖拽提示层（可选）
         if (this.state.isDragging) {
           Stack() {

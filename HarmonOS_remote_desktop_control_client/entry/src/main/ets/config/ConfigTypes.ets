@@ -164,19 +164,6 @@ export interface LogConfig {
   maxFileDays: number;
 }
 
-/**
- * Worker 配置
- */
-export interface WorkerConfig {
-  /** 图像处理 Worker 数量 */
-  captureWorkerCount: number;
-  /** 协议解析 Worker 数量 */
-  protocolWorkerCount: number;
-  /** 任务队列最大长度 */
-  maxTaskQueueSize: number;
-  /** Worker 超时时间（毫秒） */
-  workerTimeout: number;
-}
 
 /**
  * 应用配置（所有配置的集合）
@@ -198,8 +185,6 @@ export interface AppConfig {
   ui: UIConfig;
   /** 日志配置 */
   log: LogConfig;
-  /** Worker 配置 */
-  worker: WorkerConfig;
 }
 
 /**

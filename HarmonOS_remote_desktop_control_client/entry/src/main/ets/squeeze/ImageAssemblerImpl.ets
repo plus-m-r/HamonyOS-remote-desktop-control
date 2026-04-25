@@ -33,6 +33,9 @@ export class ImageAssemblerImpl implements IImageAssembler {
     const startTime = Date.now();
 
     try {
+      // 标记Tile处理开始
+      const tileProcessingStart = Date.now();
+      
       let bufferToUse: Uint8Array | null = null;
       let widthToUse: number = 0;
       let heightToUse: number = 0;
@@ -47,12 +50,15 @@ export class ImageAssemblerImpl implements IImageAssembler {
         heightToUse = this.prevHeight;
       }
 
-      // 使用 Capture.createImageBuffer 组装
+      // 使用 Capture.createImageBuffer 组装（内部会调用drawToBuffer）
       const pixelBuffer = capture.createImageBuffer(
         bufferToUse,
         widthToUse,
         heightToUse
       );
+      
+      // 计算Tile处理时间
+      const tileProcessingTime = Date.now() - tileProcessingStart;
 
       // 缓存当前帧用于下一帧复用
       this.prevBuffer = pixelBuffer;
@@ -61,13 +67,16 @@ export class ImageAssemblerImpl implements IImageAssembler {
 
       const elapsedTime = Date.now() - startTime;
       this.recordAssembleTime(elapsedTime);
+      
+      // 统计处理的tile数量
+      const processedTiles = capture.dirtyTiles.filter(t => t !== null).length;
 
       return {
         pixelBuffer,
         width: capture.width,
         height: capture.height,
         elapsedTime,
-        processedTiles: capture.dirtyTiles.filter(t => t !== null).length
+        processedTiles
       };
 
     } catch (error) {

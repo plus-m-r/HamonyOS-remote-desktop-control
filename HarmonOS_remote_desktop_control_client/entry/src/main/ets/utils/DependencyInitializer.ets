@@ -22,8 +22,7 @@ export class DependencyInitializer {
     container.register<CaptureCache>(
       DependencyKeys.CAPTURE_CACHE,
       () => {
-        const runtimeConfig = configCenter.getCaptureCacheRuntimeConfig();
-        const captureCache = new CaptureCache(runtimeConfig.maxSize, runtimeConfig.purgeSize);
+        const captureCache = new CaptureCache();
         hilog.info(DOMAIN, TAG, 'CaptureCache registered as singleton with lifecycle support');
         return captureCache;
       },

@@ -14,6 +14,8 @@ export interface Zipper {
 }
 
 export class ZstdZipper implements Zipper {
+  private fileCounter: number = 0;
+  
   zip(unzipped: MemByteBuffer): MemByteBuffer {
     throw new Error('ZSTD compression not implemented in HarmonyOS client');
   }
@@ -37,25 +39,20 @@ export class ZstdZipper implements Zipper {
     try {
       const tempDir = ContextManager.getInstance().getTempDir();
       
-      const timestamp = Date.now();
-      tempInputPath = `${tempDir}/zstd_temp_input_${timestamp}.zst`;
-      tempOutputPath = `${tempDir}/zstd_temp_output_${timestamp}.bin`;
-      
-      hilog.error(DOMAIN, TAG, 'Input zipped data size: %{public}d bytes', zippedData.length);
+      // 使用计数器代替时间戳，减少字符串操作
+      this.fileCounter++;
+      tempInputPath = `${tempDir}/zstd_in_${this.fileCounter}.zst`;
+      tempOutputPath = `${tempDir}/zstd_out_${this.fileCounter}.bin`;
       
       this.writeTempFile(tempInputPath, zippedData);
       
-      hilog.error(DOMAIN, TAG, 'Calling zstdDecompress...');
       const decompressSuccess = await zstdDecompress(tempInputPath, tempOutputPath);
-      hilog.error(DOMAIN, TAG, 'zstdDecompress returned: %{public}s', String(decompressSuccess));
       
       if (!decompressSuccess) {
         throw new Error('Zstd decompression failed');
       }
       
       const decompressedData = this.readTempFile(tempOutputPath);
-      
-      hilog.error(DOMAIN, TAG, 'Decompressed data size: %{public}d bytes', decompressedData.length);
       
       const result = MemByteBuffer.fromArray(decompressedData);
       
@@ -80,7 +77,7 @@ export class ZstdZipper implements Zipper {
       // 只写入实际的数据部分，而不是整个ArrayBuffer
       const actualData = data.buffer.slice(data.byteOffset, data.byteOffset + data.length);
       fs.writeSync(file.fd, actualData);
-      fs.fsyncSync(file.fd); // 强制刷新到磁盘
+      // 移除fsync以提升性能，临时文件不需要立即刷新到磁盘
       fs.closeSync(file);
     } catch (error) {
       const err = error as BusinessError;

@@ -29,7 +29,8 @@ struct Index {
     waitingForServerInfo: true,
     remoteControlEnabled: true,
     isConnecting: false,
-    errorMessage: ''
+    errorMessage: '',
+    serverIpInput: ''  // ⭐ 服务器IP输入
   };
 
   constructor() {
@@ -59,7 +60,23 @@ struct Index {
 
       // 订阅 ViewModel 状态变化
       this.viewModel.subscribe((newState: IndexPageState) => {
-        this.state = newState;
+        hilog.info(DOMAIN, TAG, '收到状态更新 - userId: %{public}s, waitingForServerInfo: %{public}s', 
+          newState.userId, newState.waitingForServerInfo);
+        
+        // 使用展开运算符触发 @State 更新
+        this.state = {
+          userId: newState.userId,
+          userPassword: newState.userPassword,
+          deviceIdInput: newState.deviceIdInput,
+          devicePasswordInput: newState.devicePasswordInput,
+          waitingForServerInfo: newState.waitingForServerInfo,
+          remoteControlEnabled: newState.remoteControlEnabled,
+          isConnecting: newState.isConnecting,
+          errorMessage: newState.errorMessage,
+          serverIpInput: newState.serverIpInput  // ⭐
+        };
+        
+        hilog.info(DOMAIN, TAG, 'UI 状态已更新');
       });
 
       // 设置导航回调
@@ -134,6 +151,16 @@ struct Index {
   // 一键复制设备信息 - 委托给 ViewModel
   private copyAllDeviceInfo(): void {
     this.viewModel.copyAllDeviceInfo();
+  }
+
+  // ⭐ 更新服务器IP
+  private updateServerIp(ip: string): void {
+    this.viewModel.updateServerIp(ip);
+  }
+
+  // ⭐ 重新连接
+  private async reconnectWithNewServerIp(): Promise<void> {
+    await this.viewModel.reconnectWithNewServerIp();
   }
 
   // 远程控制权限开关变化 - 委托给 ViewModel
@@ -229,6 +256,9 @@ struct Index {
             .fontSize(14)
             .fontColor('#6B7280')
             .textAlign(TextAlign.Center);
+          
+          // ⭐ 新增：服务器 IP 输入框
+          this.buildServerIpInput();
         }
         .width('100%')
         .height(100)
@@ -378,5 +408,49 @@ struct Index {
         .onClick(() => this.connectToDevice());
     }
     .width('100%');
+  }
+
+  // ⭐⭐⭐ 新增：服务器IP输入框
+  @Builder
+  buildServerIpInput() {
+    Column() {
+      Text('服务器IP地址')
+        .fontSize(12)
+        .fontColor('#6B7280')
+        .margin({ top: 16, bottom: 4 })
+        .alignSelf(ItemAlign.Start);
+
+      Row() {
+        TextInput({
+          placeholder: '例如: 192.168.1.100',
+          text: this.state.serverIpInput
+        })
+          .type(InputType.Normal)
+          .placeholderColor('#9CA3AF')
+          .placeholderFont({ size: 12 })
+          .fontSize(12)
+          .fontColor('#182431')
+          .backgroundColor('#F9FAFB')
+          .borderRadius(6)
+          .border({ width: 1, color: '#E5E7EB' })
+          .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+          .layoutWeight(1)
+          .onChange((value: string) => {
+            this.updateServerIp(value);
+          });
+
+        Button('重新连接')
+          .fontSize(12)
+          .fontColor(Color.White)
+          .backgroundColor('#10B981')
+          .borderRadius(6)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .margin({ left: 8 })
+          .onClick(() => this.reconnectWithNewServerIp());
+      }
+      .width('100%');
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16 });
   }
 }

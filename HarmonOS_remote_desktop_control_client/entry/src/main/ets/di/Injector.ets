@@ -7,7 +7,6 @@ import { IFileService } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
 import { IConnectionManager } from '../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../services/protocol/IProtocolHandler';
-import { IWorkerRepository } from '../repository/IWorkerRepository';
 import { BaseService } from './BaseService';
 
 const DOMAIN = 0x0001;
@@ -142,24 +141,17 @@ export class Injector {
       // 动态导入服务工厂
       const connectionManagerModule = await import('./factories/ConnectionManagerFactory');
       const protocolHandlerModule = await import('./factories/ProtocolHandlerFactory');
-      const workerRepositoryModule = await import('./factories/WorkerRepositoryFactory');
       const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
       const clipboardModule = await import('./factories/ClipboardServiceFactory');
       const fileModule = await import('./factories/FileServiceFactory');
 
       const ConnectionManagerFactory = connectionManagerModule.ConnectionManagerFactory;
       const ProtocolHandlerFactory = protocolHandlerModule.ProtocolHandlerFactory;
-      const WorkerRepositoryFactory = workerRepositoryModule.WorkerRepositoryFactory;
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
 
       // 注册服务工厂 - 返回接口类型
-      // 注意：注册顺序很重要，因为其他服务依赖于 WorkerRepository
-      this.registerFactory<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY,
-        () => WorkerRepositoryFactory.create()
-      );
-
       this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER,
         () => ConnectionManagerFactory.create()
       );
@@ -180,7 +172,7 @@ export class Injector {
         () => FileServiceFactory.create()
       );
 
-      hilog.info(DOMAIN, TAG, 'All service factories registered');
+      hilog.info(DOMAIN, TAG, 'All service factories registered (main thread architecture)');
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to initialize factories: %{public}s', error instanceof Error ? error.message : String(error));
       throw new Error(String(error));
@@ -197,7 +189,6 @@ interface ServiceKeysType {
   FILE_SERVICE: string;
   CONNECTION_MANAGER: string;
   PROTOCOL_HANDLER: string;
-  WORKER_REPOSITORY: string;
 }
 
 /**
@@ -208,6 +199,5 @@ export const ServiceKeys: ServiceKeysType = {
   CLIPBOARD_SERVICE: 'clipboardService',
   FILE_SERVICE: 'fileService',
   CONNECTION_MANAGER: 'connectionManager',
-  PROTOCOL_HANDLER: 'protocolHandler',
-  WORKER_REPOSITORY: 'workerRepository'
+  PROTOCOL_HANDLER: 'protocolHandler'
 };

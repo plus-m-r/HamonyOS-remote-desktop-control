@@ -3,11 +3,10 @@
  *
  * 职责划分：
  * - ConnectionManager: 管理 TCP 连接
- * - ProtocolHandler: 处理协议解析（只解析命令）
+ * - ProtocolHandler: 处理协议解析（主线程）
  * - HeartbeatManager: 管理心跳
- * - CaptureCache: 帧缓存与合并逻辑（在主线程）
- * - ImageAssembler: 图像组装（在 Worker 线程）
- * - WorkerRepository: 任务发送到 Worker 线程
+ * - CaptureCache: 帧缓存与合并逻辑（主线程）
+ * - ImageAssembler: 图像组装（主线程）
  */
 
 import {
@@ -32,7 +31,6 @@ import { IConnectionManager } from '../connection/IConnectionManager';
 import { CompressionConfig } from '../../network/CmdCodec';
 import { IProtocolHandler } from '../protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../interfaces/IHeartbeatManager';
-import { IWorkerRepository, FrameProcessTask, FrameProcessResult } from '../../repository/IWorkerRepository';
 import { CmdCodec } from '../../network/CmdCodec';
 import { ConcreteCmd } from '../../models/ConcreteCmd';
 import { CmdType } from '../../models/CmdProtocol';
@@ -84,7 +82,6 @@ export class RemoteControlService implements IRemoteControlService {
   private connectionManager: IConnectionManager;
   private protocolHandler: IProtocolHandler;
   private heartbeatManager: IHeartbeatManager;
-  private workerRepository: IWorkerRepository;
 
   // 帧组装器
   private imageAssembler: ImageAssemblerImpl = new ImageAssemblerImpl();
@@ -115,6 +112,9 @@ export class RemoteControlService implements IRemoteControlService {
   
   // 帧接收时间戳（用于计算精确的帧延迟）
   private frameReceiveTimestamp: number = 0;
+  
+  // ⭐ 新架构：PixelMap初始化标志（用于区分首帧和增量帧）
+  private isPixelMapInitialized: boolean = false;
 
   // 设备信息
   private localDeviceCode: string = '';
@@ -135,8 +135,7 @@ export class RemoteControlService implements IRemoteControlService {
     config: RemoteControlServiceConfig,
     connectionManager: IConnectionManager,
     protocolHandler: IProtocolHandler,
-    heartbeatManager: IHeartbeatManager,
-    workerRepository: IWorkerRepository
+    heartbeatManager: IHeartbeatManager
   ) {
     this.config = {
       host: config.host,
@@ -149,7 +148,6 @@ export class RemoteControlService implements IRemoteControlService {
     this.connectionManager = connectionManager;
     this.protocolHandler = protocolHandler;
     this.heartbeatManager = heartbeatManager;
-    this.workerRepository = workerRepository;
 
     // 使用依赖注入获取CaptureCache实例
     this.captureCache = DependencyContainer.getInstance().get<CaptureCache>(DependencyKeys.CAPTURE_CACHE);
@@ -210,7 +208,12 @@ export class RemoteControlService implements IRemoteControlService {
    * 使用队列确保按顺序处理，避免并发问题
    */
   private async handleReceivedData(data: ArrayBuffer): Promise<void> {
-    hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', data.byteLength);
+    const dataSize = data.byteLength;
+    
+    // 标记帧开始并记录数据包大小
+    this.performanceMonitor.markFrameStart(dataSize);
+    
+    hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', dataSize);
 
     // 接收侧背压：latest-wins，队列超限时丢弃最旧数据包，避免内存持续膨胀
     while (this.dataQueue.length >= this.maxDataQueueSize) {
@@ -255,9 +258,15 @@ export class RemoteControlService implements IRemoteControlService {
    * 处理单个数据块
    */
   private async processSingleData(data: ArrayBuffer): Promise<void> {
+    // 标记协议解析开始
+    this.performanceMonitor.markProtocolParseStart();
+    
     // 尝试让 ProtocolHandler 解析命令
     // CmdCapture 命令会通过 commandCallback -> handleCaptureData 处理
     const commands = await this.protocolHandler.processData(data);
+    
+    // 记录协议解析完成
+    this.performanceMonitor.recordProtocolParseComplete();
 
     if (commands.length > 0) {
       // 有命令，已通过 commandCallback 处理
@@ -289,6 +298,10 @@ export class RemoteControlService implements IRemoteControlService {
     this.imageAssembler.reset();
     this.dataQueue = [];
     this.isProcessingData = false;
+    
+    // ⭐ 新架构：重置PixelMap初始化标志
+    this.isPixelMapInitialized = false;
+    
     await this.connectionManager.disconnect();
     this.protocolHandler.cleanup();
     this.heartbeatManager.destroy();
@@ -326,6 +339,10 @@ export class RemoteControlService implements IRemoteControlService {
     this.imageAssembler.reset();
     this.dataQueue = [];
     this.isProcessingData = false;
+    
+    // ⭐ 新架构：重置PixelMap初始化标志
+    this.isPixelMapInitialized = false;
+    
     hilog.info(DOMAIN, TAG, 'Remote screen closed');
   }
 
@@ -731,7 +748,6 @@ export class RemoteControlService implements IRemoteControlService {
    * @param compressionMethod 压缩方法 ordinal (0=NONE, 1=ZIP, 2=XZ, 3=ZSTD)
    */
   private skippedNoPreCaptureCount: number = 0;
-  private skippedIncompleteNoBufferCount: number = 0;
   private consecutiveSkipCount: number = 0;
   private readonly consecutiveSkipWarnThreshold: number = 120;
   private renderedFrameCount: number = 0;
@@ -746,12 +762,11 @@ export class RemoteControlService implements IRemoteControlService {
       hilog.warn(
         DOMAIN,
         TAG,
-        'Consecutive skip reached %{public}d (reason=%{public}s, captureId=%{public}d, skippedNoPre=%{public}d, skippedNoBuffer=%{public}d, rendered=%{public}d)',
+        'Consecutive skip reached %{public}d (reason=%{public}s, captureId=%{public}d, skippedNoPre=%{public}d, rendered=%{public}d)',
         this.consecutiveSkipCount,
         reason,
         captureId,
         this.skippedNoPreCaptureCount,
-        this.skippedIncompleteNoBufferCount,
         this.renderedFrameCount
       );
     }
@@ -771,23 +786,6 @@ export class RemoteControlService implements IRemoteControlService {
     this.consecutiveSkipCount = 0;
   }
 
-  /**
-   * 根据待补全积压量自适应调整每轮补全处理数量
-   */
-  private getAdaptiveIncompleteBatchSize(): number {
-    const pending = this.captureCache.getPendingCaptureQueueSize();
-
-    if (pending <= 2) {
-      return 2;
-    }
-    if (pending <= 6) {
-      return 4;
-    }
-    if (pending <= 12) {
-      return 8;
-    }
-    return 12;
-  }
 
   private async onRawVideoData(
     data: ArrayBuffer,
@@ -796,15 +794,11 @@ export class RemoteControlService implements IRemoteControlService {
   ): Promise<void> {
     // 记录帧接收时间，用于计算精确的帧延迟
     this.frameReceiveTimestamp = Date.now();
-    
-    hilog.debug(DOMAIN, TAG, 'Processing raw video data: %{public}d bytes, compressionMethod: %{public}d',
-      data.byteLength, compressionMethod);
 
     try {
-      // 计算接收到的数据的校验和，确保数据完整性
-      const checksum = ChecksumUtils.computeAdler32FromBuffer(data);
-      hilog.debug(DOMAIN, TAG, 'Received data checksum: %{public}d', checksum);
-
+      // 标记解压缩开始
+      this.performanceMonitor.markDecompressStart();
+      
       // 处理所有帧
       const zippedData = MemByteBuffer.fromArray(new Uint8Array(data));
       let squeezeMethod: CompressionMethod = CompressionMethod.NONE;
@@ -826,7 +820,16 @@ export class RemoteControlService implements IRemoteControlService {
       compressor.setTileCacheConfig(useCache, cacheMaxSize, cachePurgeSize);
       const capture: Capture = await compressor.decompress(zippedData);
       
-      // 使用 preCapture 作为完整帧基线：增量帧只覆盖变化瓦片
+      // 记录解压缩完成
+      const decompressedSize = capture.dirtyTiles.reduce((sum, tile) => {
+        if (tile && tile.capture) {
+          return sum + tile.capture.size();
+        }
+        return sum;
+      }, 0);
+      this.performanceMonitor.recordDecompressComplete(decompressedSize);
+      
+      // ⭐ 新架构：流式渲染 - 立即合并到preCapture，不等完整性
       const currentCapture = capture;
       const existingPreCapture = this.captureCache.getPreCapture();
       const canMergeToPreCapture =
@@ -840,15 +843,17 @@ export class RemoteControlService implements IRemoteControlService {
       if (!canMergeToPreCapture) {
         // 重置或尺寸变化，设置新的preCapture
         this.captureCache.setPreCapture(currentCapture);
+        this.performanceMonitor.recordCacheAccess(false);
       } else {
-        // 所有增量帧都加入pending队列，由processIncompleteCaptures统一处理
-        this.captureCache.addPending(currentCapture);
+        // 立即合并当前帧到preCapture（流式渲染）
+        this.captureCache.mergeCaptureToPreCapture(currentCapture);
+        this.performanceMonitor.recordCacheAccess(true);
       }
+      
+      // 更新pending队列大小（新架构始终为0）
+      this.performanceMonitor.setPendingQueueSize(this.captureCache.getPendingCaptureQueueSize());
 
-      // 统一处理：从pending队列合并到preCapture（支持自适应批处理）
-      const adaptiveBatch = this.getAdaptiveIncompleteBatchSize();
-      const isPreCaptureComplete = this.captureCache.processIncompleteCaptures(adaptiveBatch);
-
+      // ⭐ 新架构：移除pending队列处理逻辑，直接获取preCapture渲染
       const renderCaptureCandidate = this.captureCache.getPreCapture();
       if (!renderCaptureCandidate) {
         this.skippedNoPreCaptureCount++;
@@ -858,55 +863,66 @@ export class RemoteControlService implements IRemoteControlService {
             'Skip render(no preCapture), count=%{public}d, captureId=%{public}d',
             this.skippedNoPreCaptureCount, currentCapture.id);
         }
+        this.performanceMonitor.recordSkippedFrame();
         return;
       }
       const renderCapture = renderCaptureCandidate as Capture;
 
+      // ⭐ 新架构：移除完整性检查，只要有preCapture就渲染（与Java客户端一致）
       const hasReusableBuffer = this.imageAssembler.hasReusableBuffer(renderCapture.width, renderCapture.height);
-      if (!isPreCaptureComplete && !hasReusableBuffer) {
-        this.skippedIncompleteNoBufferCount++;
-        this.recordSkip('incomplete+noBuffer', currentCapture.id);
-        if (this.skippedIncompleteNoBufferCount <= 3 || this.skippedIncompleteNoBufferCount % 30 === 0) {
-          hilog.warn(DOMAIN, TAG,
-            'Skip render(incomplete+noBuffer), count=%{public}d, captureId=%{public}d',
-            this.skippedIncompleteNoBufferCount, currentCapture.id);
-        }
-        return;
-      }
+      
+      // 记录Buffer复用情况
+      this.performanceMonitor.recordBufferReuse(hasReusableBuffer);
 
+      // 标记组装开始
+      this.performanceMonitor.markAssembleStart();
+      
       const assembleResult = await this.imageAssembler.assemble(renderCapture);
+      
+      // 记录组装完成
+      this.performanceMonitor.recordAssembleComplete();
+      
       const cId = currentCapture.id;
       const cReset = currentCapture.reset;
 
       // 直接使用组装结果，不需要CaptureProcessor中间层（与Java端一致）
       if (this.screenCallback) {
-        // 直接调用 screenCallback，由 ViewModel 创建 PixelMap
+        // ⭐ 新架构：区分首帧和增量帧
         const uint8Data = assembleResult.pixelBuffer;
         const bufferData: ArrayBuffer = uint8Data.buffer.slice(uint8Data.byteOffset, uint8Data.byteOffset + uint8Data.byteLength);
         const widthVal: number = assembleResult.width;
         const heightVal: number = assembleResult.height;
         
+        // 标记渲染开始
+        this.performanceMonitor.markRenderStart();
+        
         try {
           const renderTimestamp = Date.now();
-          this.screenCallback(
-            bufferData,
-            widthVal,
-            heightVal,
-            renderTimestamp
-          );
+          
+          // ⭐ 新架构：首帧初始化PixelMap，后续直接增量更新
+          if (!this.isPixelMapInitialized) {
+            hilog.info(DOMAIN, TAG, 'First frame received, initializing editable PixelMap');
+            // 通过screenCallback传递数据，由ViewModel初始化PixelMap
+            this.screenCallback(bufferData, widthVal, heightVal, renderTimestamp);
+            this.isPixelMapInitialized = true;
+          } else {
+            // 增量帧：直接更新PixelMap
+            this.screenCallback(bufferData, widthVal, heightVal, renderTimestamp);
+          }
           
           // 计算精确的帧延迟（从接收到渲染的时间）
           const frameDelay = renderTimestamp - this.frameReceiveTimestamp;
-          this.performanceMonitor.recordFrame(frameDelay);
+          
+          // 记录渲染完成
+          this.performanceMonitor.recordRenderComplete(frameDelay);
           
           this.resetConsecutiveSkipIfNeeded(widthVal, heightVal);
           this.renderedFrameCount++;
           if (this.renderedFrameCount <= 3 || this.renderedFrameCount % 120 === 0) {
             hilog.debug(DOMAIN, TAG,
-              'Render frame success, rendered=%{public}d, skippedNoPre=%{public}d, skippedNoBuffer=%{public}d, size=%{public}d x %{public}d',
+              'Render frame success, rendered=%{public}d, skippedNoPre=%{public}d, size=%{public}d x %{public}d',
               this.renderedFrameCount,
               this.skippedNoPreCaptureCount,
-              this.skippedIncompleteNoBufferCount,
               widthVal,
               heightVal);
           }

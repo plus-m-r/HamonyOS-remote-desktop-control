@@ -18,7 +18,7 @@ import io.github.springstudent.dekstop.common.log.Log;
 
 public class CaptureEngine implements ReConfigurable<CaptureEngineConfiguration> {
 
-    private static final Dimension TILE_DIMENSION = new Dimension(32, 32);
+    private static final Dimension TILE_DIMENSION = new Dimension(64, 64);
 
     private final Dimension captureDimension;
 

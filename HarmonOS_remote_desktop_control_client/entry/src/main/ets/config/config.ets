@@ -37,7 +37,6 @@ export type {
   ClipboardConfig,
   UIConfig,
   LogConfig,
-  WorkerConfig,
   EnvironmentType,
   ConfigChangeListener,
   ConfigPath

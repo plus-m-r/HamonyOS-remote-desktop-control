@@ -60,6 +60,24 @@ interface CoordinatePoint {
 }
 
 /**
+ * PixelMap 尺寸接口
+ */
+interface PixelMapSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * createPixelMap 选项接口
+ */
+interface CreatePixelMapOpts {
+  editable: boolean;
+  pixelFormat: image.PixelMapFormat;
+  size: PixelMapSize;
+  alphaType?: number;
+}
+
+/**
  * Toast 回调类型
  */
 export type ToastCallback = (message: string, duration?: number) => void;
@@ -75,9 +93,21 @@ export type NavigationCallback = (url: string) => void;
 export type BackCallback = () => void;
 
 /**
- * PixelMap 回调类型
+ * PixelMap 回调类型（支持整帧和增量更新）
  */
 export type ScreenPixelMapCallback = (pixelMap: image.PixelMap) => void;
+
+/**
+ * 增量更新回调类型
+ */
+export type IncrementalUpdateCallback = (
+  pixelMap: image.PixelMap,
+  data: ArrayBuffer,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+) => Promise<void>;
 
 
 
@@ -95,6 +125,12 @@ export class ControlViewModel {
   private navigationCallback: NavigationCallback | null = null;
   private backCallback: BackCallback | null = null;
   private screenPixelMapCallback: ScreenPixelMapCallback | null = null;
+  private incrementalUpdateCallback: IncrementalUpdateCallback | null = null;
+  
+  // ⭐ 当前显示的 PixelMap（每帧创建新对象）
+  private editablePixelMap: image.PixelMap | undefined = undefined;
+  private pixelMapWidth: number = 0;
+  private pixelMapHeight: number = 0;
   
   // UI 上下文，用于主线程调度
   private uiContext: UIContext | null = null;
@@ -152,6 +188,13 @@ export class ControlViewModel {
    */
   setScreenPixelMapCallback(callback: ScreenPixelMapCallback): void {
     this.screenPixelMapCallback = callback;
+  }
+
+  /**
+   * ⭐ 新增：设置增量更新回调
+   */
+  setIncrementalUpdateCallback(callback: IncrementalUpdateCallback): void {
+    this.incrementalUpdateCallback = callback;
   }
 
   /**
@@ -294,15 +337,48 @@ export class ControlViewModel {
 
     // 设置屏幕数据回调：接收原始 RGBA 数据，创建 PixelMap
     this.dependencies.remoteControlService.setScreenCallback(
-      (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
+      async (data: ArrayBuffer, width: number, height: number, timestamp: number) => {
         hilog.info(DOMAIN, TAG, '收到屏幕数据: width=%{public}d, height=%{public}d, size=%{public}d bytes, timestamp=%{public}d', 
           width, height, data.byteLength, timestamp);
         this.updateState({
           screenWidth: width,
           screenHeight: height
         });
-        // 在主线程创建 PixelMap
-        this.createPixelMapOnMainThread(data, width, height);
+        
+        // ⭐⭐⭐ 高性能方案：每帧创建新的不可编辑 PixelMap
+        try {
+          const opts: CreatePixelMapOpts = {
+            editable: false,  // ⭐ 不可编辑模式
+            pixelFormat: image.PixelMapFormat.RGBA_8888,
+            size: { height: height, width: width }
+          };
+          
+          // 直接创建新 PixelMap（鸿蒙会自动优化内存）
+          const newPixelMap = await image.createPixelMap(data, opts);
+          
+          // 释放旧的 PixelMap
+          if (this.editablePixelMap) {
+            try {
+              this.editablePixelMap.release();
+            } catch (e) {
+              hilog.warn(DOMAIN, TAG, '释放旧 PixelMap 失败');
+            }
+          }
+          
+          // 保存新的 PixelMap
+          this.editablePixelMap = newPixelMap;
+          this.pixelMapWidth = width;
+          this.pixelMapHeight = height;
+          
+          // 通知 UI 层绑定新的 PixelMap（新引用触发 @State 更新）
+          if (this.screenPixelMapCallback) {
+            this.screenPixelMapCallback(newPixelMap);
+          }
+          
+          hilog.debug(DOMAIN, TAG, '✅ PixelMap 创建成功');
+        } catch (error) {
+          hilog.error(DOMAIN, TAG, '创建 PixelMap 失败: %{public}s', JSON.stringify(error));
+        }
       }
     );
     
@@ -332,20 +408,20 @@ export class ControlViewModel {
   }
 
   /**
-   * 实际创建 PixelMap 的方法
+   * 实际创建 PixelMap 的方法（兼容旧逻辑）
    */
   private doCreatePixelMap(data: ArrayBuffer, width: number, height: number): void {
     try {
       hilog.info(DOMAIN, TAG, '开始创建 PixelMap: width=%{public}d, height=%{public}d, dataSize=%{public}d bytes', 
         width, height, data.byteLength);
       
-      const opts: image.InitializationOptions = {
+      const opts: CreatePixelMapOpts = {
         editable: false,
         pixelFormat: image.PixelMapFormat.RGBA_8888,
-        size: { height, width }
+        size: { height: height, width: width }
       };
       
-      image.createPixelMap(data, opts).then((pixelMap: image.PixelMap) => {
+      image.createPixelMap(data, opts).then((pixelMap) => {
         hilog.info(DOMAIN, TAG, 'PixelMap 创建成功');
         if (this.screenPixelMapCallback) {
           hilog.info(DOMAIN, TAG, '调用 screenPixelMapCallback');
@@ -369,10 +445,31 @@ export class ControlViewModel {
   }
 
   /**
+   * ⭐ 清理 PixelMap
+   */
+  releaseEditablePixelMap(): void {
+    if (this.editablePixelMap) {
+      try {
+        this.editablePixelMap.release();
+        hilog.info(DOMAIN, TAG, 'PixelMap released');
+      } catch (err) {
+        const error = err as BusinessError;
+        hilog.error(DOMAIN, TAG, 'Failed to release PixelMap: %{public}s', error.message);
+      }
+      this.editablePixelMap = undefined;
+      this.pixelMapWidth = 0;
+      this.pixelMapHeight = 0;
+    }
+  }
+
+  /**
    * 清理资源
    */
   dispose(): void {
     hilog.info(DOMAIN, TAG, 'ControlViewModel 清理资源');
+
+    // ⭐ 新架构：释放可编辑 PixelMap
+    this.releaseEditablePixelMap();
 
     // 清除长按定时器
     if (this.longPressTimer) {

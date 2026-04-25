@@ -111,10 +111,6 @@ export class Compressor {
     const captureHeight = unzipped.readShort(); // 捕获高度
     const tileWidth = unzipped.readShort(); // 瓦片宽度
     const tileHeight = unzipped.readShort(); // 瓦片高度
-    
-    // 打印尺寸信息，用于调试
-    hilog.debug(DOMAIN, TAG, 'captureWidth=%{public}d, captureHeight=%{public}d, tileWidth=%{public}d, tileHeight=%{public}d', captureWidth, captureHeight, tileWidth, tileHeight);
-    hilog.debug(DOMAIN, TAG, 'Read at offset=%{public}d', debugPos);
 
     // 4. 计算所有瓦片的位置和大小（使用缓存优化）
     let xywhArray: XYWH[];
@@ -196,7 +192,12 @@ export class Compressor {
     }
 
     // 6. 创建Capture对象，包含所有处理后的信息
-    const capture = new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty);
+    // 预计算是否为灰度帧，避免在drawToBuffer时重复遍历所有tile
+    const isGrayFrame = dirty.some(tile => 
+      tile !== null && tile.capture !== null && 
+      tile.capture.size() === tile.width * tile.height
+    );
+    const capture = new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty, isGrayFrame);
     
     // 7. 通知缓存一帧已处理完成（触发LRU清理）
     this.tileCache.onCaptureProcessed();

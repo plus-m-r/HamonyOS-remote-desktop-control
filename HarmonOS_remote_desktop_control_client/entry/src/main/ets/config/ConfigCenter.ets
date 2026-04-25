@@ -15,7 +15,6 @@ import {
   ClipboardConfig,
   UIConfig,
   LogConfig,
-  WorkerConfig,
   EnvironmentType,
   TcpAddress
 } from './ConfigTypes';
@@ -40,7 +39,7 @@ export interface CaptureCacheRuntimeConfig {
  */
 const DEFAULT_CONFIG: AppConfig = {
   server: {
-    host: '10.0.2.2',
+    host: '10.19.91.247',
     tcpPort: 54321,
     httpPort: 12345,
     contextPath: '/remote-desktop-control'
@@ -55,17 +54,17 @@ const DEFAULT_CONFIG: AppConfig = {
     heartbeatTimeout: 10000
   },
   capture: {
-    maxFps: 30,
-    quality: 80,
+    maxFps: 10,           // 降低帧率，给服务器更多时间发送所有tile
+    quality: 75,
     compressionMethod: 'zstd',
-    compressionLevel: 3,
-    tileSize: 64,
+    compressionLevel: 1,
+    tileSize: 64,         // 与Java端保持一致（从32改为64）
     grayscale: false
   },
   captureCache: {
-    maxSize: 50,
-    purgeSize: 25,
-    queueMaxSize: 3,
+    maxSize: 30,
+    purgeSize: 15,
+    queueMaxSize: 1,
     baseBudgetMB: 32,
     minBudgetMB: 24,
     maxBudgetMB: 96,
@@ -106,12 +105,6 @@ const DEFAULT_CONFIG: AppConfig = {
     enableFile: false,
     maxFileSize: 10,
     maxFileDays: 7
-  },
-  worker: {
-    captureWorkerCount: 2,
-    protocolWorkerCount: 1,
-    maxTaskQueueSize: 100,
-    workerTimeout: 30000
   }
 };
 
@@ -129,7 +122,7 @@ interface EnvironmentConfigs {
 const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   development: {
     server: {
-      host: '10.0.2.2',
+      host: '10.19.91.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -144,7 +137,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   testing: {
     server: {
-      host: '10.0.2.2',
+      host: '10.19.91.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -168,7 +161,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   production: {
     server: {
-      host: '10.0.2.2',
+      host: '10.19.91.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -183,7 +176,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   emulator: {
     server: {
-      host: '10.0.2.2',
+      host: '10.19.91.247',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -448,21 +441,6 @@ export class ConfigCenter {
       }
     }
     
-    if (source.worker) {
-      if (source.worker.captureWorkerCount !== undefined) {
-        result.worker.captureWorkerCount = source.worker.captureWorkerCount;
-      }
-      if (source.worker.protocolWorkerCount !== undefined) {
-        result.worker.protocolWorkerCount = source.worker.protocolWorkerCount;
-      }
-      if (source.worker.maxTaskQueueSize !== undefined) {
-        result.worker.maxTaskQueueSize = source.worker.maxTaskQueueSize;
-      }
-      if (source.worker.workerTimeout !== undefined) {
-        result.worker.workerTimeout = source.worker.workerTimeout;
-      }
-    }
-    
     return result;
   }
 
@@ -482,6 +460,24 @@ export class ConfigCenter {
 
   getServerConfig(): ServerConfig {
     return JSON.parse(JSON.stringify(this.config.server));
+  }
+
+  /**
+   * ⭐ 动态更新服务器IP地址
+   * @param host 新的服务器主机地址
+   */
+  updateServerHost(host: string): void {
+    hilog.info(DOMAIN, TAG, '更新服务器IP: %{public}s', host);
+    this.config.server.host = host;
+  }
+
+  /**
+   * ⭐ 动态更新服务器端口
+   * @param port 新的服务器端口
+   */
+  updateServerPort(port: number): void {
+    hilog.info(DOMAIN, TAG, '更新服务器端口: %{public}d', port);
+    this.config.server.tcpPort = port;
   }
 
   getNetworkConfig(): NetworkConfig {
@@ -563,10 +559,6 @@ export class ConfigCenter {
     return JSON.parse(JSON.stringify(this.config.log));
   }
 
-  getWorkerConfig(): WorkerConfig {
-    return JSON.parse(JSON.stringify(this.config.worker));
-  }
-
   getHttpUrl(path: string = ''): string {
     const host = this.config.server.host;
     const httpPort = this.config.server.httpPort;
@@ -591,7 +583,6 @@ export class ConfigCenter {
     console.info('剪贴板:', JSON.stringify(this.config.clipboard));
     console.info('UI:', JSON.stringify(this.config.ui));
     console.info('日志:', JSON.stringify(this.config.log));
-    console.info('Worker:', JSON.stringify(this.config.worker));
     console.info('===============');
   }
 }

@@ -1,22 +1,20 @@
 import { Capture } from './Capture';
-import { CaptureTile } from './CaptureTile';
 
 /**
- * Capture缓存类
+ * Capture缓存类 - 流式渲染架构
  *
- * 负责管理preCapture基线帧和pending待补全队列。
- * 用于处理异步网络环境下的帧合并和补全。
+ * 负责管理preCapture基线帧，用于buffer复用优化。
+ * 
+ * 核心设计：
+ * 1. 收到帧立即合并到preCapture（不经过pending队列）
+ * 2. 利用ArkUI异步渲染特性，不需要等待完整性
+ * 3. preCapture仅用于ImageAssembler的buffer复用，不是渲染前提
  */
 export class CaptureCache {
   private preCapture: Capture | null = null;
-  private pendingCaptures: Map<number, Capture> = new Map();
-  private pendingQueue: number[] = [];
-  private readonly maxSize: number;
-  private readonly purgeSize: number;
 
-  constructor(maxSize: number = 10, purgeSize: number = 5) {
-    this.maxSize = maxSize;
-    this.purgeSize = purgeSize;
+  constructor() {
+    // 新架构不再需要maxSize和purgeSize参数
   }
 
   /**
@@ -24,12 +22,6 @@ export class CaptureCache {
    */
   setPreCapture(capture: Capture): void {
     this.preCapture = capture;
-    // 从pending队列中移除（如果存在）
-    const index = this.pendingQueue.indexOf(capture.id);
-    if (index !== -1) {
-      this.pendingQueue.splice(index, 1);
-      this.pendingCaptures.delete(capture.id);
-    }
   }
 
   /**
@@ -40,93 +32,60 @@ export class CaptureCache {
   }
 
   /**
-   * 处理待补全capture，将其瓦片覆盖到preCapture中
-   * 返回值表示当前preCapture是否已经完整。
+   * ⭐ 新架构：立即合并capture到preCapture（流式渲染）
+   * 
+   * 与旧架构的区别：
+   * - 不经过pending队列，直接合并
+   * - 适用于ArkUI异步渲染场景
+   * - 收到帧就立即更新preCapture，不等完整性检查
    */
-  processIncompleteCaptures(maxCaptures: number = 2): boolean {
+  mergeCaptureToPreCapture(capture: Capture): void {
     if (!this.preCapture) {
-      return false;
+      // 如果没有preCapture，直接设置
+      this.setPreCapture(capture);
+      return;
     }
 
-    const tileUpdates: Map<number, CaptureTile> = new Map();
-    let processedCount = 0;
+    // 检查尺寸是否匹配
+    if (
+      capture.width !== this.preCapture.width ||
+      capture.height !== this.preCapture.height ||
+      capture.tileWidth !== this.preCapture.tileWidth ||
+      capture.tileHeight !== this.preCapture.tileHeight
+    ) {
+      // 尺寸变化，替换preCapture
+      this.setPreCapture(capture);
+      return;
+    }
 
-    while (processedCount < maxCaptures && this.pendingQueue.length > 0) {
-      const pendingId = this.pendingQueue.shift();
-      if (pendingId === undefined) {
-        break;
-      }
+    // 跳过过期帧
+    if (capture.id <= this.preCapture.id) {
+      return;
+    }
 
-      const capture = this.pendingCaptures.get(pendingId);
-      if (!capture) {
-        continue;
-      }
-
-      // 从pending队列中移除
-      this.pendingCaptures.delete(pendingId);
-
-      // 跳过过期或尺寸不匹配的帧
-      if (capture.id <= this.preCapture.id) {
-        continue;
-      }
-
-      if (
-        capture.width !== this.preCapture.width ||
-        capture.height !== this.preCapture.height ||
-        capture.tileWidth !== this.preCapture.tileWidth ||
-        capture.tileHeight !== this.preCapture.tileHeight
-      ) {
-        continue;
-      }
-
-      processedCount++;
-
-      // 收集有效瓦片
-      for (let i = 0; i < capture.dirtyTiles.length; i++) {
-        const tile = capture.dirtyTiles[i];
-        if (tile !== null && tile.capture !== null) {
-          tileUpdates.set(i, tile);
-        }
+    // 立即合并dirty tiles到preCapture
+    let mergedCount = 0;
+    for (let i = 0; i < capture.dirtyTiles.length; i++) {
+      const tile = capture.dirtyTiles[i];
+      if (tile !== null && tile.capture !== null) {
+        this.preCapture.dirtyTiles[i] = tile;
+        mergedCount++;
       }
     }
 
-    // 批量应用瓦片更新
-    const entries = Array.from(tileUpdates.entries());
-    for (let i = 0; i < entries.length; i++) {
-      const index = entries[i][0];
-      const tile = entries[i][1];
-      this.preCapture.dirtyTiles[index] = tile;
-    }
-
-    return this.isPreCaptureComplete();
-  }
-
-  /**
-   * 检查当前preCapture是否已经完整
-   */
-  isPreCaptureComplete(): boolean {
-    if (!this.preCapture) {
-      return false;
-    }
-
-    for (let i = 0; i < this.preCapture.dirtyTiles.length; i++) {
-      const tile = this.preCapture.dirtyTiles[i];
-      if (tile === null || tile.capture === null) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * 添加待补全的Capture到pending队列
-   */
-  addPending(capture: Capture): void {
-    if (!this.pendingCaptures.has(capture.id)) {
-      this.pendingCaptures.set(capture.id, capture);
-      this.pendingQueue.push(capture.id);
-    }
+    // 更新preCapture的ID和merged计数
+    this.preCapture = new Capture(
+      capture.id,
+      false, // reset标志清除
+      this.preCapture.skipped,
+      this.preCapture.merged + mergedCount,
+      this.preCapture.width,
+      this.preCapture.height,
+      this.preCapture.tileWidth,
+      this.preCapture.tileHeight,
+      this.preCapture.dirtyTiles,
+      this.preCapture.isGrayFrame
+    );
   }
 
   /**
@@ -134,14 +93,12 @@ export class CaptureCache {
    */
   clear(): void {
     this.preCapture = null;
-    this.pendingCaptures.clear();
-    this.pendingQueue = [];
   }
 
   /**
-   * 获取待补全队列大小
+   * 获取待补全队列大小（新架构始终为0）
    */
   getPendingCaptureQueueSize(): number {
-    return this.pendingQueue.length;
+    return 0;
   }
 }

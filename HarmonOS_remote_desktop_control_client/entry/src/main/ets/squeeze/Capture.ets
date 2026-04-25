@@ -43,6 +43,7 @@ export class Capture {
   readonly tileWidth: number;
   readonly tileHeight: number;
   readonly dirtyTiles: (CaptureTile | null)[];
+  readonly isGrayFrame: boolean;
 
   constructor(
     id: number,
@@ -53,7 +54,8 @@ export class Capture {
     height: number,
     tileWidth: number,
     tileHeight: number,
-    dirtyTiles: (CaptureTile | null)[]
+    dirtyTiles: (CaptureTile | null)[],
+    isGrayFrame: boolean = false
   ) {
     this.id = id;
     this.reset = reset;
@@ -64,6 +66,7 @@ export class Capture {
     this.tileWidth = tileWidth;
     this.tileHeight = tileHeight;
     this.dirtyTiles = [...dirtyTiles];
+    this.isGrayFrame = isGrayFrame;
   }
 
   createImageBuffer(prevBuffer: Uint8Array | null, prevWidth: number, prevHeight: number): Uint8Array {
@@ -106,91 +109,90 @@ export class Capture {
     const capWidth = this.width;
     const capHeight = this.height;
     const capWidthByteSize = capWidth * 4;
-    const bufferSize = capWidth * capHeight * 4;
 
-    // 检查是否为灰度图像
-    const isGray = this.dirtyTiles.some(tile =>
-      tile !== null && tile.capture !== null &&
-      tile.capture.size() === tile.width * tile.height
-    );
+    // 使用预计算的isGrayFrame标志，避免运行时遍历所有tile判断灰度
+    const isGray = this.isGrayFrame;
+    
+    // 标记Tile处理开始
+    const tileProcessingStart = Date.now();
+    let processedTileCount = 0;
 
     for (let i = 0; i < this.dirtyTiles.length; i++) {
       const tile = this.dirtyTiles[i];
       
       if (tile === null || tile.capture === null) {
-        // 非脏瓦片：保持之前的内容
         continue;
       }
 
       const src = tile.capture.getInternal();
       const tileWidth = tile.width;
       const tileHeight = tile.height;
+      const destPos = tile.y * capWidthByteSize + tile.x * 4;
 
-      let destPos = tile.y * capWidthByteSize + tile.x * 4;
-
-      // 根据数据大小判断处理方式
       if (isGray) {
-        this.processGrayData(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize, bufferSize);
+        this.processGrayDataOptimized(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize);
       } else {
-        this.processArgbData(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize, bufferSize);
+        this.processArgbDataOptimized(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize);
       }
+      
+      processedTileCount++;
     }
+    
+    // 记录Tile处理完成（可以通过全局PerformanceMonitor记录）
+    // 注意：这里不直接调用PerformanceMonitor，避免循环依赖
+    // 可以在上层ImageAssembler中记录
   }
 
   /**
-   * 处理8位灰度数据，转换为32位RGBA格式
-   * 与Java端一致：灰度值扩展到R、G、B通道，A通道设为255（不透明）
+   * 优化版：处理32位ARGB数据 - 使用批量拷贝
    */
-  private processGrayData(
+  private processArgbDataOptimized(
     buffer: Uint8Array,
     src: Uint8Array,
     tileWidth: number,
     tileHeight: number,
     destPos: number,
-    capWidthByteSize: number,
-    bufferSize: number
+    capWidthByteSize: number
+  ): void {
+    const tileWidthByteSize = tileWidth * 4;
+    
+    // 逐行批量拷贝，使用Uint8Array.set（类似Java的System.arraycopy）
+    for (let y = 0; y < tileHeight; y++) {
+      const srcOffset = y * tileWidthByteSize;
+      const destOffset = destPos + y * capWidthByteSize;
+      
+      // 批量拷贝整行数据
+      buffer.set(src.subarray(srcOffset, srcOffset + tileWidthByteSize), destOffset);
+    }
+  }
+
+  /**
+   * 优化版：处理8位灰度数据，转换为32位RGBA格式
+   */
+  private processGrayDataOptimized(
+    buffer: Uint8Array,
+    src: Uint8Array,
+    tileWidth: number,
+    tileHeight: number,
+    destPos: number,
+    capWidthByteSize: number
   ): void {
     let srcPos = 0;
     
     for (let y = 0; y < tileHeight; y++) {
-      for (let x = 0; x < tileWidth; x++) {
-        if (srcPos < src.length) {
-          // 将8位灰度值转换为32位RGBA格式
-          const grayValue = src[srcPos++];
-          buffer[destPos] = grayValue;     // R
-          buffer[destPos + 1] = grayValue; // G
-          buffer[destPos + 2] = grayValue; // B
-          buffer[destPos + 3] = 255;       // A (不透明)
-        }
-        
-        destPos += 4;
-      }
-      destPos += capWidthByteSize - tileWidth * 4;
-    }
-  }
-
-  /**
-   * 处理32位BGRA数据 - 与Java客户端一致
-   */
-  private processArgbData(
-    buffer: Uint8Array,
-    src: Uint8Array,
-    tileWidth: number,
-    tileHeight: number,
-    destPos: number,
-    capWidthByteSize: number,
-    bufferSize: number
-  ): void {
-    const tileWidthByteSize = tileWidth * 4;
-    
-    for (let y = 0; y < tileHeight; y++) {
-      const srcPos = y * tileWidthByteSize;
-      const rowSize = Math.min(tileWidthByteSize, src.length - srcPos);
+      const destRowOffset = destPos + y * capWidthByteSize;
       
-      // 直接批量复制BGRA数据（Blue, Green, Red, Alpha）
-      // 与Java客户端一致：保持原始数据，不修改透明度
-      buffer.set(src.subarray(srcPos, srcPos + rowSize), destPos);
-      destPos += capWidthByteSize;
+      // 展开内层循环，减少索引计算开销
+      for (let x = 0; x < tileWidth; x++) {
+        const grayValue = src[srcPos++];
+        const offset = destRowOffset + x * 4;
+        
+        // 一次性设置RGBA四个通道
+        buffer[offset] = grayValue;
+        buffer[offset + 1] = grayValue;
+        buffer[offset + 2] = grayValue;
+        buffer[offset + 3] = 255;
+      }
     }
   }
 }

@@ -5,11 +5,6 @@
  * 为所有数据结构显式定义接口
  */
 
-import {
-  FrameProcessResult,
-  ProtocolParseResult
-} from '../repository/IWorkerRepository';
-
 /**
  * HTTP请求成功响应
  */
@@ -54,77 +49,6 @@ export interface QuickUploadResponse {
   fileId?: string;
 }
 
-/**
- * Worker任务回调类型
- */
-export type WorkerTaskResolve<T> = (value: T) => void;
-export type WorkerTaskReject = (reason?: Error) => void;
-
-/**
- * Worker任务项
- */
-export interface WorkerTaskItem<T> {
-  resolve: WorkerTaskResolve<T>;
-  reject: WorkerTaskReject;
-}
-
-/**
- * 帧处理Worker任务项
- */
-export interface ImageProcessTaskItem {
-  resolve: (value: FrameProcessResult) => void;
-  reject: (reason?: Error) => void;
-}
-
-/**
- * 协议解析Worker任务项
- */
-export interface ProtocolParseTaskItem {
-  resolve: (value: ProtocolParseResult) => void;
-  reject: (reason?: Error) => void;
-}
-
-/**
- * Worker消息
- */
-export interface WorkerMessage {
-  type: 'frameResult' | 'protocolResult' | 'error';
-  taskId: number;
-  data?: Object;
-  error?: string;
-}
-
-/**
- * 帧处理任务消息
- */
-export interface ImageTaskMessage {
-  type: 'processFrame';
-  taskId: number;
-  task: Object;
-}
-
-/**
- * 协议解析任务消息
- */
-export interface ProtocolTaskMessage {
-  type: 'parseProtocol';
-  taskId: number;
-  task: Object;
-}
-
-/**
- * Worker消息数据
- */
-export interface WorkerMessageData {
-  data: WorkerMessage;
-}
-
-/**
- * Worker错误数据
- */
-export interface WorkerErrorData {
-  message: string;
-}
 
 /**
  * 设备代码请求

@@ -1,11 +1,6 @@
 {
   "apiType": "stageMode",
   "buildOption": {
-    "sourceOption": {
-      "workers": [
-        "./src/main/ets/workers/ProtocolWorker.ets"
-      ]
-    },
     "resOptions": {
       "copyCodeResource": {
         "enable": false

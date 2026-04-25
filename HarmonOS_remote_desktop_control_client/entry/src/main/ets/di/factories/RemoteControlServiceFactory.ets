@@ -9,7 +9,6 @@ import {
 import { IConnectionManager } from '../../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../../services/protocol/IProtocolHandler';
 import { IHeartbeatManager } from '../../services/interfaces/IHeartbeatManager';
-import { IWorkerRepository } from '../../repository/IWorkerRepository';
 import { configCenter } from '../../config/config';
 import { Injector, ServiceKeys } from '../Injector';
 import { HeartbeatManager } from '../../services/heartbeat/HeartbeatManager';
@@ -36,7 +35,6 @@ export class RemoteControlServiceFactory {
     const injector = Injector.getInstance();
     const connectionManager = injector.resolve<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER);
     const protocolHandler = injector.resolve<IProtocolHandler>(ServiceKeys.PROTOCOL_HANDLER);
-    const workerRepository = injector.resolve<IWorkerRepository>(ServiceKeys.WORKER_REPOSITORY);
     const heartbeatManager = new HeartbeatManager({
       interval: 3000,
       timeout: 5000
@@ -51,16 +49,15 @@ export class RemoteControlServiceFactory {
       heartbeatInterval: 3000
     };
 
-    // 创建服务实例
+    // 创建服务实例（移除 workerRepository 参数）
     const service = new RemoteControlService(
       config,
       connectionManager,
       protocolHandler,
-      heartbeatManager,
-      workerRepository
+      heartbeatManager
     );
 
-    hilog.info(DOMAIN, TAG, 'Service created');
+    hilog.info(DOMAIN, TAG, 'Service created (main thread architecture)');
     
     return service;
   }

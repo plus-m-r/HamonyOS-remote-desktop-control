@@ -28,6 +28,36 @@ export interface PerformanceStats {
   skippedFrames: number;
   /** 跳帧率（%） */
   skipRate: number;
+  
+  // 各环节详细性能指标
+  /** 网络接收耗时（ms） */
+  networkReceiveTime: number;
+  /** 协议解析耗时（ms） */
+  protocolParseTime: number;
+  /** 解压缩耗时（ms） */
+  decompressTime: number;
+  /** 解压后数据大小（字节） */
+  decompressedSize: number;
+  /** 图像组装耗时（ms） */
+  assembleTime: number;
+  /** 渲染耗时（ms） */
+  renderTime: number;
+  /** 端到端总延迟（ms） */
+  endToEndDelay: number;
+  
+  // 缓存统计
+  /** 缓存命中率（%） */
+  cacheHitRate: number;
+  /** pending队列长度 */
+  pendingQueueSize: number;
+  /** Buffer复用率（%） */
+  bufferReuseRate: number;
+  
+  // 网络统计
+  /** 数据包大小（字节） */
+  dataPacketSize: number;
+  /** 队列等待时间（ms） */
+  queueWaitTime: number;
 }
 
 export class PerformanceMonitor {
@@ -56,6 +86,37 @@ export class PerformanceMonitor {
   private isRunning: boolean = false;
   private logTimer: number | null = null;
   
+  // 各环节性能统计
+  private networkReceiveTimes: number[] = [];
+  private protocolParseTimes: number[] = [];
+  private decompressTimes: number[] = [];
+  private decompressedSizes: number[] = [];
+  private assembleTimes: number[] = [];
+  private renderTimes: number[] = [];
+  private endToEndDelays: number[] = [];
+  
+  // 缓存统计
+  private cacheHits: number = 0;
+  private cacheMisses: number = 0;
+  private bufferReuses: number = 0;
+  private bufferTotalOps: number = 0;
+  
+  // 网络统计
+  private dataPacketSizes: number[] = [];
+  private queueWaitTimes: number[] = [];
+  
+  private readonly sampleSize: number = 60;
+  
+  // 当前帧的时间戳追踪
+  private frameStartTime: number = 0;
+  private networkReceiveStart: number = 0;
+  private protocolParseStart: number = 0;
+  private decompressStart: number = 0;
+  private assembleStart: number = 0;
+  private renderStart: number = 0;
+  
+  private pendingQueueSizeCurrent: number = 0;
+  
   private constructor() {}
   
   static getInstance(): PerformanceMonitor {
@@ -80,6 +141,25 @@ export class PerformanceMonitor {
     this.skippedFrames = 0;
     this.minFps = Number.MAX_VALUE;
     this.maxFps = 0;
+    
+    // 初始化各环节统计数组
+    this.networkReceiveTimes = [];
+    this.protocolParseTimes = [];
+    this.decompressTimes = [];
+    this.decompressedSizes = [];
+    this.assembleTimes = [];
+    this.renderTimes = [];
+    this.endToEndDelays = [];
+    
+    // 初始化缓存统计
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.bufferReuses = 0;
+    this.bufferTotalOps = 0;
+    
+    // 初始化网络统计
+    this.dataPacketSizes = [];
+    this.queueWaitTimes = [];
     
     // 启动定期日志输出（每5秒）
     this.logTimer = setInterval(() => {
@@ -177,6 +257,55 @@ export class PerformanceMonitor {
       ? Math.round((this.skippedFrames / totalProcessed) * 1000) / 10
       : 0;
     
+    // 计算各环节平均耗时
+    const avgNetworkReceive = this.networkReceiveTimes.length > 0
+      ? Math.round(this.networkReceiveTimes.reduce((a, b) => a + b, 0) / this.networkReceiveTimes.length)
+      : 0;
+    
+    const avgProtocolParse = this.protocolParseTimes.length > 0
+      ? Math.round(this.protocolParseTimes.reduce((a, b) => a + b, 0) / this.protocolParseTimes.length)
+      : 0;
+    
+    const avgDecompress = this.decompressTimes.length > 0
+      ? Math.round(this.decompressTimes.reduce((a, b) => a + b, 0) / this.decompressTimes.length)
+      : 0;
+    
+    const avgDecompressedSize = this.decompressedSizes.length > 0
+      ? Math.round(this.decompressedSizes.reduce((a, b) => a + b, 0) / this.decompressedSizes.length)
+      : 0;
+    
+    const avgAssemble = this.assembleTimes.length > 0
+      ? Math.round(this.assembleTimes.reduce((a, b) => a + b, 0) / this.assembleTimes.length)
+      : 0;
+    
+    const avgRender = this.renderTimes.length > 0
+      ? Math.round(this.renderTimes.reduce((a, b) => a + b, 0) / this.renderTimes.length)
+      : 0;
+    
+    const avgEndToEnd = this.endToEndDelays.length > 0
+      ? Math.round(this.endToEndDelays.reduce((a, b) => a + b, 0) / this.endToEndDelays.length)
+      : 0;
+    
+    // 计算缓存命中率
+    const cacheHitRate = (this.cacheHits + this.cacheMisses) > 0
+      ? Math.round((this.cacheHits / (this.cacheHits + this.cacheMisses)) * 1000) / 10
+      : 0;
+    
+    // 计算Buffer复用率
+    const bufferReuseRate = this.bufferTotalOps > 0
+      ? Math.round((this.bufferReuses / this.bufferTotalOps) * 1000) / 10
+      : 0;
+    
+    // 计算平均数据包大小
+    const avgDataPacketSize = this.dataPacketSizes.length > 0
+      ? Math.round(this.dataPacketSizes.reduce((a, b) => a + b, 0) / this.dataPacketSizes.length)
+      : 0;
+    
+    // 计算平均队列等待时间
+    const avgQueueWait = this.queueWaitTimes.length > 0
+      ? Math.round(this.queueWaitTimes.reduce((a, b) => a + b, 0) / this.queueWaitTimes.length)
+      : 0;
+    
     return {
       fps: this.currentFps,
       avgFps: avgFps,
@@ -186,7 +315,22 @@ export class PerformanceMonitor {
       currentFrameDelay: this.currentDelay,
       totalFrames: this.totalFrames,
       skippedFrames: this.skippedFrames,
-      skipRate: skipRate
+      skipRate: skipRate,
+      
+      networkReceiveTime: avgNetworkReceive,
+      protocolParseTime: avgProtocolParse,
+      decompressTime: avgDecompress,
+      decompressedSize: avgDecompressedSize,
+      assembleTime: avgAssemble,
+      renderTime: avgRender,
+      endToEndDelay: avgEndToEnd,
+      
+      cacheHitRate: cacheHitRate,
+      pendingQueueSize: this.pendingQueueSizeCurrent,
+      bufferReuseRate: bufferReuseRate,
+      
+      dataPacketSize: avgDataPacketSize,
+      queueWaitTime: avgQueueWait
     };
   }
   
@@ -211,6 +355,29 @@ export class PerformanceMonitor {
       stats.totalFrames + stats.skippedFrames
     );
     
+    // 输出详细环节耗时
+    hilog.info(DOMAIN, TAG,
+      'Pipeline - Network: %{public}dms | Parse: %{public}dms | Decompress: %{public}dms | ' +
+      'Assemble: %{public}dms | Render: %{public}dms | EndToEnd: %{public}dms',
+      stats.networkReceiveTime,
+      stats.protocolParseTime,
+      stats.decompressTime,
+      stats.assembleTime,
+      stats.renderTime,
+      stats.endToEndDelay
+    );
+    
+    // 输出缓存和网络统计
+    hilog.info(DOMAIN, TAG,
+      'Cache Hit: %{public}d%% | Buffer Reuse: %{public}d%% | Pending: %{public}d | ' +
+      'Packet Size: %{public}dB | Queue Wait: %{public}dms',
+      stats.cacheHitRate,
+      stats.bufferReuseRate,
+      stats.pendingQueueSize,
+      stats.dataPacketSize,
+      stats.queueWaitTime
+    );
+    
     // 低FPS警告
     if (stats.fps < 15 && stats.totalFrames > 10) {
       hilog.warn(DOMAIN, TAG, 'Low FPS detected: %{public}d', stats.fps);
@@ -224,6 +391,16 @@ export class PerformanceMonitor {
     // 高跳帧率警告
     if (stats.skipRate > 10 && stats.totalFrames > 10) {
       hilog.warn(DOMAIN, TAG, 'High skip rate: %{public}d%%', stats.skipRate);
+    }
+    
+    // 高解压缩耗时警告
+    if (stats.decompressTime > 50 && stats.totalFrames > 10) {
+      hilog.warn(DOMAIN, TAG, 'High decompress time: %{public}dms', stats.decompressTime);
+    }
+    
+    // 高组装耗时警告
+    if (stats.assembleTime > 30 && stats.totalFrames > 10) {
+      hilog.warn(DOMAIN, TAG, 'High assemble time: %{public}dms', stats.assembleTime);
     }
   }
   
@@ -242,6 +419,185 @@ export class PerformanceMonitor {
     this.maxFps = 0;
     this.currentDelay = 0;
     
+    // 重置各环节统计
+    this.networkReceiveTimes = [];
+    this.protocolParseTimes = [];
+    this.decompressTimes = [];
+    this.decompressedSizes = [];
+    this.assembleTimes = [];
+    this.renderTimes = [];
+    this.endToEndDelays = [];
+    
+    // 重置缓存统计
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.bufferReuses = 0;
+    this.bufferTotalOps = 0;
+    
+    // 重置网络统计
+    this.dataPacketSizes = [];
+    this.queueWaitTimes = [];
+    
     hilog.info(DOMAIN, TAG, 'Performance stats reset');
+  }
+  
+  /**
+   * 标记帧开始（数据接收）
+   * @param dataSize 数据包大小
+   */
+  markFrameStart(dataSize: number = 0): void {
+    if (!this.isRunning) return;
+    this.frameStartTime = Date.now();
+    this.networkReceiveStart = this.frameStartTime;
+    
+    // 记录数据包大小
+    if (dataSize > 0) {
+      this.dataPacketSizes.push(dataSize);
+      if (this.dataPacketSizes.length > this.sampleSize) {
+        this.dataPacketSizes.shift();
+      }
+    }
+  }
+  
+  /**
+   * 标记协议解析开始
+   */
+  markProtocolParseStart(): void {
+    if (!this.isRunning) return;
+    this.protocolParseStart = Date.now();
+  }
+  
+  /**
+   * 记录协议解析完成
+   */
+  recordProtocolParseComplete(): void {
+    if (!this.isRunning) return;
+    const parseTime = Date.now() - this.protocolParseStart;
+    this.protocolParseTimes.push(parseTime);
+    if (this.protocolParseTimes.length > this.sampleSize) {
+      this.protocolParseTimes.shift();
+    }
+  }
+  
+  /**
+   * 标记解压缩开始
+   */
+  markDecompressStart(): void {
+    if (!this.isRunning) return;
+    this.decompressStart = Date.now();
+  }
+  
+  /**
+   * 记录解压缩完成
+   * @param decompressedSize 解压后数据大小
+   */
+  recordDecompressComplete(decompressedSize: number): void {
+    if (!this.isRunning) return;
+    const decompressTime = Date.now() - this.decompressStart;
+    this.decompressTimes.push(decompressTime);
+    if (this.decompressTimes.length > this.sampleSize) {
+      this.decompressTimes.shift();
+    }
+    
+    this.decompressedSizes.push(decompressedSize);
+    if (this.decompressedSizes.length > this.sampleSize) {
+      this.decompressedSizes.shift();
+    }
+  }
+  
+  /**
+   * 标记组装开始
+   */
+  markAssembleStart(): void {
+    if (!this.isRunning) return;
+    this.assembleStart = Date.now();
+  }
+  
+  /**
+   * 记录组装完成
+   */
+  recordAssembleComplete(): void {
+    if (!this.isRunning) return;
+    const assembleTime = Date.now() - this.assembleStart;
+    
+    this.assembleTimes.push(assembleTime);
+    if (this.assembleTimes.length > this.sampleSize) {
+      this.assembleTimes.shift();
+    }
+  }
+  
+  /**
+   * 标记渲染开始
+   */
+  markRenderStart(): void {
+    if (!this.isRunning) return;
+    this.renderStart = Date.now();
+  }
+  
+  /**
+   * 记录渲染完成和整体帧延迟
+   * @param frameDelay 从接收到渲染的总延迟
+   */
+  recordRenderComplete(frameDelay: number): void {
+    if (!this.isRunning) return;
+    const renderTime = Date.now() - this.renderStart;
+    
+    this.renderTimes.push(renderTime);
+    if (this.renderTimes.length > this.sampleSize) {
+      this.renderTimes.shift();
+    }
+    
+    this.endToEndDelays.push(frameDelay);
+    if (this.endToEndDelays.length > this.sampleSize) {
+      this.endToEndDelays.shift();
+    }
+    
+    this.recordFrame(frameDelay);
+  }
+  
+  /**
+   * 记录缓存命中/未命中
+   * @param isHit 是否命中缓存
+   */
+  recordCacheAccess(isHit: boolean): void {
+    if (!this.isRunning) return;
+    if (isHit) {
+      this.cacheHits++;
+    } else {
+      this.cacheMisses++;
+    }
+  }
+  
+  /**
+   * 记录Buffer复用
+   * @param isReused 是否复用了Buffer
+   */
+  recordBufferReuse(isReused: boolean): void {
+    if (!this.isRunning) return;
+    this.bufferTotalOps++;
+    if (isReused) {
+      this.bufferReuses++;
+    }
+  }
+  
+  /**
+   * 记录队列等待时间
+   * @param waitTime 等待时间（ms）
+   */
+  recordQueueWait(waitTime: number): void {
+    if (!this.isRunning) return;
+    this.queueWaitTimes.push(waitTime);
+    if (this.queueWaitTimes.length > this.sampleSize) {
+      this.queueWaitTimes.shift();
+    }
+  }
+  
+  /**
+   * 设置pending队列大小
+   * @param size 队列长度
+   */
+  setPendingQueueSize(size: number): void {
+    if (!this.isRunning) return;
+    this.pendingQueueSizeCurrent = size;
   }
 }
