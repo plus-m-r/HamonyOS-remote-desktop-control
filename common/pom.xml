@@ -33,7 +33,7 @@
         <dependency>
             <groupId>com.github.luben</groupId>
             <artifactId>zstd-jni</artifactId>
-            <version>1.5.5-6</version>
+            <!-- 版本由父pom.xml的DependencyManagement统一管理 -->
         </dependency>
         <!-- LZ4压缩库 -->
         <dependency>
