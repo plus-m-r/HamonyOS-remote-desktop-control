@@ -2,7 +2,7 @@ package io.github.springstudent.dekstop.client.core;
 
 import io.github.springstudent.dekstop.client.RemoteClient;
 import io.github.springstudent.dekstop.client.bean.Capture;
-import io.github.springstudent.dekstop.client.compress.DeCompressorEngine;
+import io.github.springstudent.dekstop.client.compress.DeCompressorEngineV2;
 import io.github.springstudent.dekstop.client.compress.DeCompressorEngineListener;
 import io.github.springstudent.dekstop.client.monitor.*;
 import io.github.springstudent.dekstop.client.utils.DialogFactory;
@@ -47,7 +47,7 @@ public class RemoteController extends RemoteControll implements DeCompressorEngi
 
     private String deviceCode;
 
-    private DeCompressorEngine deCompressorEngine;
+    private DeCompressorEngineV2 deCompressorEngine;
 
     private CaptureEngineConfiguration captureEngineConfiguration;
 
@@ -78,7 +78,7 @@ public class RemoteController extends RemoteControll implements DeCompressorEngi
     public RemoteController() {
         captureEngineConfiguration = new CaptureEngineConfiguration();
         compressorEngineConfiguration = new CompressorEngineConfiguration();
-        deCompressorEngine = new DeCompressorEngine(this);
+        deCompressorEngine = new DeCompressorEngineV2(this);
         deCompressorEngine.start(8);
         receivedBitCounter = new BitCounter("receivedBits", "网络宽带使用量");
         receivedBitCounter.start(1000);
