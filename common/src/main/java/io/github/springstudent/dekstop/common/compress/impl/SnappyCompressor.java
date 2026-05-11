@@ -1,18 +1,19 @@
 package io.github.springstudent.dekstop.common.compress.impl;
 
-import io.github.springstudent.dekstop.common.compress.CompressionException;
-import io.github.springstudent.dekstop.common.compress.CompressionMethod;
-import io.github.springstudent.dekstop.common.compress.CompressorConfig;
-import io.github.springstudent.dekstop.common.compress.ICompressor;
-import org.xerial.snappy.SnappyInputStream;
-import org.xerial.snappy.SnappyOutputStream;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import org.xerial.snappy.SnappyInputStream;
+import org.xerial.snappy.SnappyOutputStream;
+
+import io.github.springstudent.dekstop.common.compress.CompressionException;
+import io.github.springstudent.dekstop.common.compress.CompressionMethod;
+import io.github.springstudent.dekstop.common.compress.CompressorConfig;
+import io.github.springstudent.dekstop.common.compress.ICompressor;
 
 /**
  * Snappy压缩器实现
