@@ -1,7 +1,9 @@
-package io.github.springstudent.dekstop.common.compress;
+package io.github.springstudent.dekstop.common.compress.impl;
 
-import net.jpountz.lz4.LZ4FrameInputStream;
-import net.jpountz.lz4.LZ4FrameOutputStream;
+import io.github.springstudent.dekstop.common.compress.CompressionException;
+import io.github.springstudent.dekstop.common.compress.CompressionMethod;
+import io.github.springstudent.dekstop.common.compress.CompressorConfig;
+import io.github.springstudent.dekstop.common.compress.ICompressor;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,6 +11,9 @@ import java.io.OutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import net.jpountz.lz4.LZ4FrameInputStream;
+import net.jpountz.lz4.LZ4FrameOutputStream;
 
 /**
  * LZ4压缩器实现
@@ -105,9 +110,6 @@ public class Lz4Compressor implements ICompressor {
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 lz4Out.write(buffer, 0, bytesRead);
             }
-            
-            // try-with-resources会自动调用close()，确保所有数据都被压缩和刷新
-            // LZ4FrameOutputStream.close()会完成帧写入并刷新到底层流
         }
     }
     

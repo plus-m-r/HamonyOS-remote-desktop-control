@@ -1,5 +1,9 @@
-package io.github.springstudent.dekstop.common.compress;
+package io.github.springstudent.dekstop.common.compress.impl;
 
+import io.github.springstudent.dekstop.common.compress.CompressionException;
+import io.github.springstudent.dekstop.common.compress.CompressionMethod;
+import io.github.springstudent.dekstop.common.compress.CompressorConfig;
+import io.github.springstudent.dekstop.common.compress.ICompressor;
 import org.xerial.snappy.SnappyInputStream;
 import org.xerial.snappy.SnappyOutputStream;
 

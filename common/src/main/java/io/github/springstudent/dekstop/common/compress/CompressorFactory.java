@@ -1,7 +1,12 @@
 package io.github.springstudent.dekstop.common.compress;
 
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import io.github.springstudent.dekstop.common.compress.impl.Lz4Compressor;
+import io.github.springstudent.dekstop.common.compress.impl.NoneCompressor;
+import io.github.springstudent.dekstop.common.compress.impl.SnappyCompressor;
+import io.github.springstudent.dekstop.common.compress.impl.ZstdCompressor;
 
 /**
  * 压缩器工厂类

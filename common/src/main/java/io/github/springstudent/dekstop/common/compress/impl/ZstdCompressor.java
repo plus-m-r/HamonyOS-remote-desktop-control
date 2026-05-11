@@ -1,15 +1,19 @@
-package io.github.springstudent.dekstop.common.compress;
+package io.github.springstudent.dekstop.common.compress.impl;
 
-import com.github.luben.zstd.ZstdInputStream;
-import com.github.luben.zstd.ZstdOutputStream;
-
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import com.github.luben.zstd.ZstdInputStream;
+import com.github.luben.zstd.ZstdOutputStream;
+
+import io.github.springstudent.dekstop.common.compress.CompressionException;
+import io.github.springstudent.dekstop.common.compress.CompressionMethod;
+import io.github.springstudent.dekstop.common.compress.CompressorConfig;
+import io.github.springstudent.dekstop.common.compress.ICompressor;
 
 /**
  * ZSTD压缩器实现

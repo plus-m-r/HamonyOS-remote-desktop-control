@@ -1,4 +1,4 @@
-package io.github.springstudent.dekstop.common.compress;
+package io.github.springstudent.dekstop.common.compress.impl;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -6,6 +6,11 @@ import java.io.OutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import io.github.springstudent.dekstop.common.compress.CompressionException;
+import io.github.springstudent.dekstop.common.compress.CompressionMethod;
+import io.github.springstudent.dekstop.common.compress.CompressorConfig;
+import io.github.springstudent.dekstop.common.compress.ICompressor;
 
 /**
  * 无压缩器实现（用于测试和基准对比）
