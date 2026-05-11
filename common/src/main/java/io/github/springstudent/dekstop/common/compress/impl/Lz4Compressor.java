@@ -106,9 +106,8 @@ public class Lz4Compressor implements ICompressor {
                 lz4Out.write(buffer, 0, bytesRead);
             }
             
-            // 确保所有数据都被压缩和刷新
-            lz4Out.flush();
-            lz4Out.finish();
+            // try-with-resources会自动调用close()，确保所有数据都被压缩和刷新
+            // LZ4FrameOutputStream.close()会完成帧写入并刷新到底层流
         }
     }
     
