@@ -4,6 +4,7 @@ import ConfigCenterTest from './config/ConfigCenter.test';
 import ModelsExtendedTest from './models/ModelsExtended.test';
 import ServicesInterfacesTest from './services/ServicesInterfaces.test';
 import AppStateManagerTest from './state/AppStateManager.test';
+import CompressorTest from './compress/Compressor.test';
 
 export default function testsuite() {
   UtilsUnitTest();
@@ -12,4 +13,5 @@ export default function testsuite() {
   ModelsExtendedTest();
   ServicesInterfacesTest();
   AppStateManagerTest();
+  CompressorTest();
 }

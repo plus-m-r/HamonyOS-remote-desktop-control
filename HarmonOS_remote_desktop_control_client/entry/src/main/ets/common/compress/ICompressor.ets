@@ -1,3 +1,8 @@
+
+import { CompressionMethod } from './CompressionMethod';
+import { CompressorConfig } from './CompressorConfig';
+import { CompressionError } from './CompressionError';
+
 /**
  * 统一压缩器接口（异步流式 - HarmonyOS版本）
  * 
