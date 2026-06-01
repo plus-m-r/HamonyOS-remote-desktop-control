@@ -41,7 +41,7 @@ export default class EntryAbility extends UIAbility {
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
     
-    // 配置全局 Context（@ohos/commons-compress 需要）
+    // 配置全局 Context
     GlobalContext.getContext().setObject("context", this.context);
     
     // 初始化 ContextManager，保存应用上下文供全局使用

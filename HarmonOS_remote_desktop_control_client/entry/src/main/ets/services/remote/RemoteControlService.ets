@@ -25,7 +25,8 @@ import {
   ClientInfoCallback,
   ConnectionCallback,
   ClipboardCallback,
-  CaptureStatus
+  CaptureStatus,
+  CompressionMethod
 } from '../../models/CmdProtocol';
 import { IConnectionManager } from '../connection/IConnectionManager';
 import { CompressionConfig } from '../../network/CmdCodec';
@@ -36,7 +37,7 @@ import { ConcreteCmd } from '../../models/ConcreteCmd';
 import { CmdType } from '../../models/CmdProtocol';
 import { CmdUtils } from '../../models/CmdFactory';
 import { MemByteBuffer } from '../../squeeze/MemByteBuffer';
-import { Compressor, CompressionMethod } from '../../squeeze/Compressor';
+import { FrameDecoder } from '../../squeeze/FrameDecoder';
 
 import { Capture } from '../../squeeze/Capture';
 import { CaptureCache } from '../../squeeze/CaptureCache';
@@ -813,12 +814,12 @@ export class RemoteControlService implements IRemoteControlService {
           squeezeMethod = CompressionMethod.ZSTD;
           break;
       }
-      const compressor = Compressor.get(squeezeMethod);
+      const decoder = FrameDecoder.get(squeezeMethod);
       const useCache = compressionConfig ? compressionConfig.useCache : this.useCompressorCache;
       const cacheMaxSize = compressionConfig ? compressionConfig.cacheMaxSize : this.compressorCacheMaxSize;
       const cachePurgeSize = compressionConfig ? compressionConfig.cachePurgeSize : this.compressorCachePurgeSize;
-      compressor.setTileCacheConfig(useCache, cacheMaxSize, cachePurgeSize);
-      const capture: Capture = await compressor.decompress(zippedData);
+      decoder.setTileCacheConfig(useCache, cacheMaxSize, cachePurgeSize);
+      const capture: Capture = await decoder.decompress(zippedData);
       
       // 记录解压缩完成
       const decompressedSize = capture.dirtyTiles.reduce((sum, tile) => {

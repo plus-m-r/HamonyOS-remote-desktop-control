@@ -1,10 +1,10 @@
 /**
- * Compressor 相关组件单元测试
- * 
+ * Squeeze 组件单元测试
+ *
  * 测试项目：
- * 1. MemByteBuffer - 完整功能测试（已在 Utils.test.ets）
- * 2. RunLengthEncoder - RLE 编码/解码
- * 3. TileCache - 缓存机制
+ * 1. RunLengthEncoder - RLE 编码/解码
+ * 2. TileCache - 缓存机制
+ * 3. MemByteBuffer - 边界场景测试
  * 4. processUncached - 数据读取逻辑
  */
 
@@ -14,7 +14,7 @@ import { RegularRunLengthEncoder } from '../../../../main/ets/squeeze/RunLengthE
 import { NullTileCache, RegularTileCache } from '../../../../main/ets/squeeze/TileCache';
 import { XYWH } from '../../../../main/ets/squeeze/XYWH';
 
-export default function CompressorUnitTest() {
+export default function SqueezeComponentsUnitTest() {
 
   // ========== RegularRunLengthEncoder 测试 ==========
   describe('RegularRunLengthEncoderTest', 0, () => {
@@ -83,7 +83,7 @@ export default function CompressorUnitTest() {
     it('NullTileCache 缓存操作', () => {
       const cache = new NullTileCache();
       const xywh = new XYWH(0, 0, 32, 32);
-      
+
       const tileBuffer = new MemByteBuffer();
       tileBuffer.writeByte(0);
 
@@ -99,7 +99,7 @@ export default function CompressorUnitTest() {
     it('RegularTileCache 缓存添加和获取', () => {
       const cache = new RegularTileCache(10, 5);
       const xywh = new XYWH(0, 0, 32, 32);
-      
+
       const tileBuffer = new MemByteBuffer();
       tileBuffer.writeByte(0x12);
 
@@ -123,7 +123,7 @@ export default function CompressorUnitTest() {
     it('Buffer underflow 检测', () => {
       buffer.writeByte(1);
       buffer.reset();
-      
+
       let errorThrown = false;
       try {
         buffer.readShort();
@@ -136,7 +136,7 @@ export default function CompressorUnitTest() {
     it('边界读取 - 刚好足够', () => {
       buffer.writeShort(12345);
       buffer.reset();
-      
+
       const value = buffer.readShort();
       expect(value).assertEqual(12345);
     });

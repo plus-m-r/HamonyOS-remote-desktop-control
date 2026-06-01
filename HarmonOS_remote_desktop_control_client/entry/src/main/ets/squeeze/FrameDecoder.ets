@@ -3,56 +3,46 @@ import { MemByteBuffer } from './MemByteBuffer';
 import { CaptureTile } from './CaptureTile';
 import { Capture } from './Capture';
 import { TileCache, NullTileCache, RegularTileCache } from './TileCache';
-
 import { RunLengthEncoder, NullRunLengthEncoder, RegularRunLengthEncoder } from './RunLengthEncoder';
-import { Zipper, ZstdZipper } from './Zipper';
 import { XYWH, getXYWH } from './XYWH';
+import { CompressionMethod } from '../models/CmdProtocol';
+import { CompressorFactory as LibraryFactory, ICompressor as LibraryICompressor } from 'library_decompressor';
 
 const DOMAIN: number = 0xFF00;
-const TAG: string = 'Compressor';
+const TAG: string = 'FrameDecoder';
 
-export enum CompressionMethod {
-  NONE = 0,
-  ZIP = 1,
-  XZ = 2,
-  ZSTD = 3
-}
-
-export class Compressor {
-  private static readonly ZSTD_COMPRESSOR: Compressor = new Compressor(
+export class FrameDecoder {
+  private static readonly ZSTD_DECODER: FrameDecoder = new FrameDecoder(
     CompressionMethod.ZSTD,
-    new NullRunLengthEncoder(),
-    new ZstdZipper()
+    new NullRunLengthEncoder()
   );
-  private static loggedDecompressData: boolean = false;
 
   readonly method: CompressionMethod;
   private readonly rle: RunLengthEncoder;
-  private readonly zipper: Zipper;
   private tileCache: TileCache = new NullTileCache();
   private useTileCache: boolean = false;
   private tileCacheMaxSize: number = 1000;
   private tileCachePurgeSize: number = 500;
-  
-  // 缓存上次的尺寸参数和XYWH数组，避免重复计算
+
+  private zstdInner: LibraryICompressor | null = null;
+
   private lastCaptureWidth: number = -1;
   private lastCaptureHeight: number = -1;
   private lastTileWidth: number = -1;
   private lastTileHeight: number = -1;
   private lastXywhArray: XYWH[] = [];
 
-  private constructor(method: CompressionMethod, rle: RunLengthEncoder, zipper: Zipper) {
+  private constructor(method: CompressionMethod, rle: RunLengthEncoder) {
     this.method = method;
     this.rle = rle;
-    this.zipper = zipper;
   }
 
-  static get(method: CompressionMethod): Compressor {
+  static get(method: CompressionMethod): FrameDecoder {
     switch (method) {
       case CompressionMethod.ZSTD:
-        return Compressor.ZSTD_COMPRESSOR;
+        return FrameDecoder.ZSTD_DECODER;
       default:
-        throw new Error(`Unsupported compressor configuration [${method}]! Only ZSTD is supported.`);
+        throw new Error(`Unsupported compression method [${method}]! Only ZSTD is supported.`);
     }
   }
 
@@ -80,178 +70,147 @@ export class Compressor {
     }
   }
 
-  /**
-   * 解压并处理压缩数据，将其转换为Capture对象
-   * @param zipped 压缩的字节缓冲区
-   * @returns 处理后的Capture对象
-   */
   async decompress(zipped: MemByteBuffer): Promise<Capture> {
-    // 1. 使用ZSTD算法解压数据
-    const unzipped = await this.zipper.unzip(zipped);
+    const unzipped = await this.zstdDecompress(zipped);
 
-    // 2. 重置读取指针到缓冲区开始位置
     unzipped.reset();
 
-    // 3. 读取元数据
-    const cId = unzipped.readInt(); // 捕获ID
-    const cReset = unzipped.readByte() === 1; // 是否重置缓存
+    const cId = unzipped.readInt();
+    const cReset = unzipped.readByte() === 1;
 
     if (cReset) {
       this.tileCache.clear();
     }
 
-    const cSkipped = unzipped.readUnsignedByte(); // 跳过的帧数
-    const cMerged = unzipped.readUnsignedByte(); // 合并的帧数
-    
-    // 保存当前位置以便调试
-    const debugPos = unzipped.getReadOffset();
-    
-    // 读取捕获的尺寸信息
-    const captureWidth = unzipped.readShort(); // 捕获宽度
-    const captureHeight = unzipped.readShort(); // 捕获高度
-    const tileWidth = unzipped.readShort(); // 瓦片宽度
-    const tileHeight = unzipped.readShort(); // 瓦片高度
+    const cSkipped = unzipped.readUnsignedByte();
+    const cMerged = unzipped.readUnsignedByte();
 
-    // 4. 计算所有瓦片的位置和大小（使用缓存优化）
+    const captureWidth = unzipped.readShort();
+    const captureHeight = unzipped.readShort();
+    const tileWidth = unzipped.readShort();
+    const tileHeight = unzipped.readShort();
+
     let xywhArray: XYWH[];
-    if (captureWidth === this.lastCaptureWidth && 
-        captureHeight === this.lastCaptureHeight && 
-        tileWidth === this.lastTileWidth && 
+    if (captureWidth === this.lastCaptureWidth &&
+        captureHeight === this.lastCaptureHeight &&
+        tileWidth === this.lastTileWidth &&
         tileHeight === this.lastTileHeight) {
-      // 使用缓存的XYWH数组
       xywhArray = this.lastXywhArray;
     } else {
-      // 计算新的XYWH数组
       xywhArray = getXYWH(captureWidth, captureHeight, tileWidth, tileHeight);
-      // 更新缓存
       this.lastCaptureWidth = captureWidth;
       this.lastCaptureHeight = captureHeight;
       this.lastTileWidth = tileWidth;
       this.lastTileHeight = tileHeight;
       this.lastXywhArray = xywhArray;
     }
-    // 初始化瓦片数组，用于存储处理后的瓦片数据
     const dirty: (CaptureTile | null)[] = new Array(xywhArray.length).fill(null);
 
-    let idx = 0; // 当前处理的瓦片索引
+    let idx = 0;
 
-    // 5. 循环处理每个瓦片
     while (idx < dirty.length) {
-      // 读取markerCount，表示连续有效瓦片的数量（正数）或跳过瓦片的数量（负数）
       const markerCount = unzipped.readByte();
 
       if (markerCount > 0) {
-        // 处理连续的有效瓦片
         let processedCount = 0;
         for (let tidx = idx; tidx < idx + markerCount; tidx++) {
           if (tidx >= dirty.length) {
-            break; // 防止越界
+            break;
           }
 
-          // 确保瓦片的位置和大小信息存在
           if (!xywhArray[tidx]) {
             hilog.warn(DOMAIN, TAG, 'xywhArray[tidx] is undefined: tidx=%{public}d, array length=%{public}d', tidx, xywhArray.length);
             continue;
           }
 
-          // 读取瓦片值，用于判断瓦片类型
           const value = unzipped.readShort();
 
-          // 根据value值处理不同类型的瓦片
           if (value >= 0 && value < 256) {
-            // 单级瓦片：value是颜色索引
             dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
           } else if (value === 256) {
-            // 缓存瓦片：按cacheId恢复
             const cacheId = unzipped.readInt();
             const cachedTile = this.tileCache.get(cacheId);
             if (cachedTile === CaptureTile.MISSING) {
-              // 缓存未命中时设为null，保留上一帧内容（优于显示黑块）
               dirty[tidx] = null;
             } else {
               dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cachedTile);
             }
           } else {
-            // 未缓存的多级瓦片：value是负数，dataLength是其绝对值
             this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, value);
           }
           processedCount++;
         }
-        // 更新瓦片索引
         idx += processedCount;
         if (idx >= dirty.length) {
-          break; // 所有瓦片处理完毕，退出循环
+          break;
         }
       } else {
-        // 跳过瓦片：markerCount为负数，计算跳过的数量
         const skipCount = -markerCount + 1;
         for (let i = 0; i < skipCount && idx < dirty.length; i++) {
-          dirty[idx++] = null; // 将跳过的瓦片设为null
+          dirty[idx++] = null;
         }
       }
     }
 
-    // 6. 创建Capture对象，包含所有处理后的信息
-    // 预计算是否为灰度帧，避免在drawToBuffer时重复遍历所有tile
-    const isGrayFrame = dirty.some(tile => 
-      tile !== null && tile.capture !== null && 
+    const isGrayFrame = dirty.some(tile =>
+      tile !== null && tile.capture !== null &&
       tile.capture.size() === tile.width * tile.height
     );
     const capture = new Capture(cId, cReset, cSkipped, cMerged, captureWidth, captureHeight, tileWidth, tileHeight, dirty, isGrayFrame);
-    
-    // 7. 通知缓存一帧已处理完成（触发LRU清理）
+
     this.tileCache.onCaptureProcessed();
-    
-    // 8. 返回处理后的Capture对象
+
     return capture;
   }
 
-  /**
-   * 处理非缓存的瓦片数据
-   * @param unzipped 解压后的字节缓冲区
-   * @param xywh 瓦片的位置和大小信息
-   * @param dirty 瓦片数组，用于存储处理后的瓦片
-   * @param tidx 当前处理的瓦片索引
-   * @param value 瓦片数据长度信息（负数）
-   */
+  private async zstdDecompress(zipped: MemByteBuffer): Promise<MemByteBuffer> {
+    try {
+      const zippedData = zipped.getInternal();
+      const buffer = zippedData.buffer.slice(zippedData.byteOffset, zippedData.byteOffset + zippedData.length) as ArrayBuffer;
+      const inner = this.getZstdInner();
+      const result = await inner.decompressAsync(buffer);
+      return MemByteBuffer.fromArray(new Uint8Array(result));
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      hilog.error(DOMAIN, TAG, 'ZSTD decompression failed: %{public}s', errorMessage);
+      throw new Error(errorMessage);
+    }
+  }
+
+  private getZstdInner(): LibraryICompressor {
+    if (this.zstdInner === null) {
+      this.zstdInner = LibraryFactory.create('zstd');
+    }
+    return this.zstdInner;
+  }
+
   private processUncached(unzipped: MemByteBuffer, xywh: XYWH, dirty: (CaptureTile | null)[], tidx: number, value: number): void {
-    // 1. 计算瓦片数据长度（value是负数，取其绝对值）
     const dataLength = -value;
-    
-    // 2. 检查数据长度是否有效（> 0 且 <= 1MB）
+
     if (dataLength <= 0 || dataLength > 1024 * 1024) {
       hilog.error(DOMAIN, TAG, 'processUncached: invalid dataLength: %{public}d (value: %{public}d)', dataLength, value);
       return;
     }
-    
-    // 3. 检查缓冲区是否有足够的数据
+
     const available = unzipped.getWriteOffset() - unzipped.getReadOffset();
     if (available < dataLength) {
       hilog.warn(DOMAIN, TAG, 'processUncached: not enough data available: %{public}d, needed: %{public}d, using available data', available, dataLength);
-      // 读取所有可用数据
       const tdata = unzipped.readBytes(available);
-      
-      // 4. 创建输出缓冲区并进行行程长度解码
+
       const out = new MemByteBuffer();
       this.rle.runLengthDecode(out, MemByteBuffer.fromArray(tdata));
 
-      // 5. 创建瓦片
       dirty[tidx] = CaptureTile.fromCapture(xywh, out);
-      // 与Java端一致：无条件添加到缓存
       this.tileCache.add(dirty[tidx] as CaptureTile);
       return;
     }
-    
-    // 6. 数据充足，读取完整数据
+
     const tdata = unzipped.readBytes(dataLength);
-    
-    // 7. 创建输出缓冲区并进行行程长度解码
+
     const out = new MemByteBuffer();
     this.rle.runLengthDecode(out, MemByteBuffer.fromArray(tdata));
 
-    // 8. 创建瓦片
     dirty[tidx] = CaptureTile.fromCapture(xywh, out);
-    // 与Java端一致：无条件添加到缓存
     this.tileCache.add(dirty[tidx] as CaptureTile);
   }
 }
