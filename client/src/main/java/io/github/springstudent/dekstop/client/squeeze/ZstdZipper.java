@@ -1,11 +1,12 @@
 package io.github.springstudent.dekstop.client.squeeze;
 
 import com.github.luben.zstd.ZstdInputStream;
-import com.github.luben.zstd.ZstdOutputStream;
+import com.github.luben.zstd.ZstdCompressCtx;
 import io.github.springstudent.dekstop.common.bean.MemByteBuffer;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * @author ZhouNing
@@ -14,13 +15,14 @@ import java.io.IOException;
 public class ZstdZipper implements Zipper {
     @Override
     public MemByteBuffer zip(MemByteBuffer unzipped) throws IOException {
-        try (MemByteBuffer zipped = new MemByteBuffer()) {
-            try (ZstdOutputStream zstdOutputStream = new ZstdOutputStream(zipped)) {
-                zstdOutputStream.write(unzipped.getInternal(), 0, unzipped.size());
-                zstdOutputStream.flush();
-                return zipped;
-            }
-        }
+        byte[] rawData = Arrays.copyOf(unzipped.getInternal(), unzipped.size());
+        ZstdCompressCtx ctx = new ZstdCompressCtx();
+        ctx.setContentSize(true);
+        byte[] compressed = ctx.compress(rawData);
+        ctx.close();
+        MemByteBuffer zipped = new MemByteBuffer();
+        zipped.write(compressed);
+        return zipped;
     }
 
     @Override
