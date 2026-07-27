@@ -37,9 +37,17 @@ export class NullTileCache implements TileCache {
   }
 }
 
+interface LruEntry {
+  cacheId: number;
+  prev: LruEntry | null;
+  next: LruEntry | null;
+}
+
 export class RegularTileCache implements TileCache {
   private tiles: Map<number, CaptureTile> = new Map();
-  private lru: number[] = []; // LRU队列，头部是最久未使用的
+  private entries: Map<number, LruEntry> = new Map();
+  private head: LruEntry | null = null;
+  private tail: LruEntry | null = null;
   private hits: number = 0;
   private readonly maxSize: number;
   private readonly purgeSize: number;
@@ -50,22 +58,88 @@ export class RegularTileCache implements TileCache {
   }
 
   getCacheId(tile: CaptureTile): number {
-    // 与Java端一致：直接使用checksum作为cacheId
     const cs = tile.checksum;
     if (cs < 0 || cs > 4294967295) {
-      // checksum超出int范围时截断（与Java端警告一致）
       return Math.floor(cs & 0xFFFFFFFF);
     }
     return cs;
   }
 
+  private moveToHead(entry: LruEntry): void {
+    if (entry === this.head) {
+      return;
+    }
+    if (entry.prev !== null) {
+      entry.prev.next = entry.next;
+    }
+    if (entry.next !== null) {
+      entry.next.prev = entry.prev;
+    }
+    if (entry === this.tail) {
+      this.tail = entry.prev;
+    }
+    entry.prev = null;
+    entry.next = this.head;
+    if (this.head !== null) {
+      this.head.prev = entry;
+    }
+    this.head = entry;
+    if (this.tail === null) {
+      this.tail = entry;
+    }
+  }
+
+  private removeTail(): number {
+    if (this.tail === null) {
+      return -1;
+    }
+    const cacheId = this.tail.cacheId;
+    if (this.tail.prev !== null) {
+      this.tail.prev.next = null;
+    } else {
+      this.head = null;
+    }
+    const oldTail = this.tail;
+    this.tail = this.tail.prev;
+    this.entries.delete(cacheId);
+    this.tiles.delete(cacheId);
+    return cacheId;
+  }
+
+  private removeFromList(entry: LruEntry): void {
+    if (entry.prev !== null) {
+      entry.prev.next = entry.next;
+    } else {
+      this.head = entry.next;
+    }
+    if (entry.next !== null) {
+      entry.next.prev = entry.prev;
+    } else {
+      this.tail = entry.prev;
+    }
+    entry.prev = null;
+    entry.next = null;
+  }
+
   add(tile: CaptureTile): void {
-    // 与Java端一致：只有缓存未满时才添加
-    if (this.tiles.size < this.maxSize) {
-      const cacheId = this.getCacheId(tile);
+    const cacheId = this.getCacheId(tile);
+    const existing = this.entries.get(cacheId);
+    if (existing !== undefined) {
+      this.removeFromList(existing);
+      this.entries.delete(cacheId);
+      this.tiles.delete(cacheId);
+    }
+    if (this.tiles.size < this.maxSize || existing !== undefined) {
       this.tiles.set(cacheId, tile);
-      // 添加到LRU队列头部（最新使用）
-      this.lru.unshift(cacheId);
+      const entry: LruEntry = { cacheId: cacheId, prev: null, next: this.head };
+      this.entries.set(cacheId, entry);
+      if (this.head !== null) {
+        this.head.prev = entry;
+      }
+      this.head = entry;
+      if (this.tail === null) {
+        this.tail = entry;
+      }
     }
   }
 
@@ -73,11 +147,9 @@ export class RegularTileCache implements TileCache {
     const tile = this.tiles.get(cachedId);
     if (tile !== undefined) {
       this.hits++;
-      // 与Java端一致：命中时移动到LRU队列头部
-      const index = this.lru.indexOf(cachedId);
-      if (index !== -1) {
-        this.lru.splice(index, 1);
-        this.lru.unshift(cachedId);
+      const entry = this.entries.get(cachedId);
+      if (entry !== undefined) {
+        this.moveToHead(entry);
       }
       return tile;
     }
@@ -90,19 +162,16 @@ export class RegularTileCache implements TileCache {
 
   clear(): void {
     this.tiles.clear();
-    this.lru = [];
+    this.entries.clear();
+    this.head = null;
+    this.tail = null;
     this.hits = 0;
   }
 
   onCaptureProcessed(): void {
-    // 与Java端完全一致的LRU清理逻辑
     if (this.tiles.size > 0 && this.tiles.size >= this.maxSize) {
-      // 从LRU队列头部移除最久未使用的条目，直到缓存大小降至purgeSize
-      while (this.tiles.size > this.purgeSize && this.lru.length > 0) {
-        const oldestId = this.lru.shift(); // 移除并返回第一个元素
-        if (oldestId !== undefined) {
-          this.tiles.delete(oldestId);
-        }
+      while (this.tiles.size > this.purgeSize && this.tail !== null) {
+        this.removeTail();
       }
     }
   }

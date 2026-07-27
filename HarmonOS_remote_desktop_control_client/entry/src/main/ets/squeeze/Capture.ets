@@ -1,14 +1,14 @@
 import { CaptureTile } from './CaptureTile';
-import { BufferPool } from '../utils/ObjectPool';
+import { BufferPool, PooledBuffer } from '../utils/ObjectPool';
 import { logManager } from '../utils/LogManager';
 import { util } from '@kit.ArkTS';
 import fs from '@ohos.file.fs';
 import { Context } from '@kit.AbilityKit';
+import { TileRegion } from '@plusml/arkzero';
 
 const PERF_DOMAIN = 0xFF00;
 const PERF_TAG = 'CapturePerf';
 
-// 接口定义
 interface CaptureInfo {
   id: number;
   reset: boolean;
@@ -31,7 +31,10 @@ interface ContextWithFilesDir {
   filesDir: string;
 }
 
-
+export interface CreateImageBufferResult {
+  buffer: Uint8Array;
+  pooledBuffer: PooledBuffer | null;
+}
 
 export class Capture {
   readonly id: number;
@@ -69,57 +72,41 @@ export class Capture {
     this.isGrayFrame = isGrayFrame;
   }
 
-  createImageBuffer(prevBuffer: Uint8Array | null, prevWidth: number, prevHeight: number): Uint8Array {
+  createImageBuffer(prevBuffer: Uint8Array | null, prevWidth: number, prevHeight: number): CreateImageBufferResult {
     const capWidth = this.width;
     const capHeight = this.height;
     const bufferSize = capWidth * capHeight * 4;
 
     let buffer: Uint8Array;
+    let pooledBuffer: PooledBuffer | null = null;
     const bufferPool = BufferPool.getInstance();
 
-    // 优先使用对象池，其次复用前一帧缓冲区
     if (prevBuffer !== null && capWidth === prevWidth && capHeight === prevHeight && prevBuffer.length === bufferSize) {
       buffer = prevBuffer;
-      
-      // 如果是重置操作，清空缓冲区
       if (this.reset) {
         buffer.fill(0);
       }
     } else {
-      // 使用对象池获取缓冲区
-      buffer = bufferPool.acquireBuffer(bufferSize);
-      
-      // 如果是重置操作，确保缓冲区为空
+      pooledBuffer = bufferPool.acquireBuffer(bufferSize);
+      buffer = pooledBuffer.data;
       if (this.reset) {
         buffer.fill(0);
       }
     }
 
-    // 绘制到缓冲区
     this.drawToBuffer(buffer);
 
-    return buffer;
+    return { buffer: buffer, pooledBuffer: pooledBuffer };
   }
 
-  /**
-   * 绘制 dirty tiles 到给定缓冲区
-   * @param buffer 目标缓冲区
-   */
   drawToBuffer(buffer: Uint8Array): void {
     const capWidth = this.width;
-    const capHeight = this.height;
     const capWidthByteSize = capWidth * 4;
-
-    // 使用预计算的isGrayFrame标志，避免运行时遍历所有tile判断灰度
     const isGray = this.isGrayFrame;
-    
-    // 标记Tile处理开始
-    const tileProcessingStart = Date.now();
-    let processedTileCount = 0;
 
     for (let i = 0; i < this.dirtyTiles.length; i++) {
       const tile = this.dirtyTiles[i];
-      
+
       if (tile === null || tile.capture === null) {
         continue;
       }
@@ -134,18 +121,59 @@ export class Capture {
       } else {
         this.processArgbDataOptimized(buffer, src, tileWidth, tileHeight, destPos, capWidthByteSize);
       }
-      
-      processedTileCount++;
     }
-    
-    // 记录Tile处理完成（可以通过全局PerformanceMonitor记录）
-    // 注意：这里不直接调用PerformanceMonitor，避免循环依赖
-    // 可以在上层ImageAssembler中记录
   }
 
-  /**
-   * 优化版：处理32位ARGB数据 - 使用批量拷贝
-   */
+  toTileRegions(): TileRegion[] {
+    const fw = this.width;
+    const fh = this.height;
+    const isGray = this.isGrayFrame;
+    const regions: TileRegion[] = [];
+
+    for (let i = 0; i < this.dirtyTiles.length; i++) {
+      const tile = this.dirtyTiles[i];
+      if (tile === null || tile.capture === null) {
+        continue;
+      }
+
+      const src = tile.capture.getInternal();
+      const tw = tile.width;
+      const th = tile.height;
+      let pixelData: ArrayBuffer;
+
+      if (isGray) {
+        const rgbaSize = tw * th * 4;
+        const rgba = new Uint8Array(rgbaSize);
+        const lut = Capture.GRAY_LUT;
+        let srcPos = 0;
+        for (let p = 0; p < tw * th; p++) {
+          const rgbaOffset = p * 4;
+          const val = lut[src[srcPos++]];
+          rgba[rgbaOffset] = val & 0xFF;
+          rgba[rgbaOffset + 1] = (val >> 8) & 0xFF;
+          rgba[rgbaOffset + 2] = (val >> 16) & 0xFF;
+          rgba[rgbaOffset + 3] = (val >> 24) & 0xFF;
+        }
+        const grayBuf: ArrayBuffer = rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset + rgba.byteLength);
+        pixelData = grayBuf;
+      } else {
+        const argbBuf: ArrayBuffer = src.buffer.slice(src.byteOffset, src.byteOffset + src.byteLength);
+        pixelData = argbBuf;
+      }
+
+      const region: TileRegion = {
+        ratioX: tile.x / fw,
+        ratioY: tile.y / fh,
+        tilePixelWidth: tw,
+        tilePixelHeight: th,
+        pixelData: pixelData
+      };
+      regions.push(region);
+    }
+
+    return regions;
+  }
+
   private processArgbDataOptimized(
     buffer: Uint8Array,
     src: Uint8Array,
@@ -155,20 +183,24 @@ export class Capture {
     capWidthByteSize: number
   ): void {
     const tileWidthByteSize = tileWidth * 4;
-    
-    // 逐行批量拷贝，使用Uint8Array.set（类似Java的System.arraycopy）
+
     for (let y = 0; y < tileHeight; y++) {
       const srcOffset = y * tileWidthByteSize;
       const destOffset = destPos + y * capWidthByteSize;
-      
-      // 批量拷贝整行数据
       buffer.set(src.subarray(srcOffset, srcOffset + tileWidthByteSize), destOffset);
     }
   }
 
-  /**
-   * 优化版：处理8位灰度数据，转换为32位RGBA格式
-   */
+  private static readonly GRAY_LUT: Uint32Array = Capture.buildGrayLUT();
+
+  private static buildGrayLUT(): Uint32Array {
+    const lut = new Uint32Array(256);
+    for (let g = 0; g < 256; g++) {
+      lut[g] = 0xFF000000 | (g << 16) | (g << 8) | g;
+    }
+    return lut;
+  }
+
   private processGrayDataOptimized(
     buffer: Uint8Array,
     src: Uint8Array,
@@ -177,24 +209,15 @@ export class Capture {
     destPos: number,
     capWidthByteSize: number
   ): void {
+    const lut = Capture.GRAY_LUT;
     let srcPos = 0;
-    
+
     for (let y = 0; y < tileHeight; y++) {
       const destRowOffset = destPos + y * capWidthByteSize;
-      
-      // 展开内层循环，减少索引计算开销
+      const dest32 = new Uint32Array(buffer.buffer, buffer.byteOffset + destRowOffset, tileWidth);
       for (let x = 0; x < tileWidth; x++) {
-        const grayValue = src[srcPos++];
-        const offset = destRowOffset + x * 4;
-        
-        // 一次性设置RGBA四个通道
-        buffer[offset] = grayValue;
-        buffer[offset + 1] = grayValue;
-        buffer[offset + 2] = grayValue;
-        buffer[offset + 3] = 255;
+        dest32[x] = lut[src[srcPos++]];
       }
     }
   }
 }
-
-

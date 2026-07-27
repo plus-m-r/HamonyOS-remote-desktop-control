@@ -168,8 +168,12 @@ export class FrameDecoder {
       const zippedData = zipped.getInternal();
       const buffer = zippedData.buffer.slice(zippedData.byteOffset, zippedData.byteOffset + zippedData.length) as ArrayBuffer;
       const inner = this.getZstdInner();
-      const result = await inner.decompressAsync(buffer);
-      return MemByteBuffer.fromArray(new Uint8Array(result));
+      const result: ArrayBuffer = await inner.decompressAsync(buffer) as ArrayBuffer;
+      const resultView = new Uint8Array(result);
+      const mbb = new MemByteBuffer(resultView.length);
+      mbb.writeBytes(resultView);
+      mbb.reset();
+      return mbb;
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       hilog.error(DOMAIN, TAG, 'ZSTD decompression failed: %{public}s', errorMessage);

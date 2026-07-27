@@ -14,7 +14,9 @@ import {
   DeviceCredentials,
   ScreenCallback,
   DeviceInfoCallback,
-  RemoteControlServiceConfig
+  RemoteControlServiceConfig,
+  TileScreenCallback,
+  TileRenderData
 } from '../interfaces/IRemoteControlService';
 import {
   RemoteControlEvent,
@@ -126,6 +128,7 @@ export class RemoteControlService implements IRemoteControlService {
 
   // 回调
   private screenCallback: ScreenCallback | null = null;
+  private tileScreenCallback: TileScreenCallback | null = null;
   private clientInfoCallback: ClientInfoCallback | null = null;
   private connectionCallback: ConnectionCallback | null = null;
   private clipboardCallback: ClipboardCallback | null = null;
@@ -349,6 +352,10 @@ export class RemoteControlService implements IRemoteControlService {
 
   setScreenCallback(callback: ScreenCallback): void {
     this.screenCallback = callback;
+  }
+
+  setTileScreenCallback(callback: TileScreenCallback): void {
+    this.tileScreenCallback = callback;
   }
 
 
@@ -665,39 +672,14 @@ export class RemoteControlService implements IRemoteControlService {
    * 将base64字符串解码为ArrayBuffer
    */
   private decodeBase64ToArrayBuffer(base64: string): ArrayBuffer {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    const out: number[] = [];
-
-    for (let i = 0; i < base64.length; i += 4) {
-      const c0 = base64.charAt(i);
-      const c1 = base64.charAt(i + 1);
-      const c2 = base64.charAt(i + 2);
-      const c3 = base64.charAt(i + 3);
-
-      const n0 = chars.indexOf(c0);
-      const n1 = chars.indexOf(c1);
-      const n2 = c2 === '=' ? -1 : chars.indexOf(c2);
-      const n3 = c3 === '=' ? -1 : chars.indexOf(c3);
-
-      if (n0 < 0 || n1 < 0 || (n2 < 0 && c2 !== '=') || (n3 < 0 && c3 !== '=')) {
-        throw new Error('Invalid base64 content');
-      }
-
-      const b0 = (n0 << 2) | (n1 >> 4);
-      out.push(b0 & 0xFF);
-
-      if (c2 !== '=') {
-        const b1 = ((n1 & 0x0F) << 4) | (n2 >> 2);
-        out.push(b1 & 0xFF);
-      }
-
-      if (c3 !== '=') {
-        const b2 = ((n2 & 0x03) << 6) | n3;
-        out.push(b2 & 0xFF);
-      }
+    try {
+      const helper = new util.Base64Helper();
+      const decoded = helper.decodeSync(base64);
+      return decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.byteLength);
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'Base64Helper decode failed: %{public}s', e instanceof Error ? e.message : String(e));
+      return new ArrayBuffer(0);
     }
-
-    return new Uint8Array(out).buffer;
   }
 
   /**
@@ -830,7 +812,39 @@ export class RemoteControlService implements IRemoteControlService {
       }, 0);
       this.performanceMonitor.recordDecompressComplete(decompressedSize);
       
-      // ⭐ 新架构：流式渲染 - 立即合并到preCapture，不等完整性
+      if (this.tileScreenCallback) {
+        this.performanceMonitor.markRenderStart();
+        try {
+          const tileRegions = capture.toTileRegions();
+
+          const tileData: TileRenderData = {
+            tiles: tileRegions,
+            frameWidth: capture.width,
+            frameHeight: capture.height,
+            captureId: capture.id,
+            isReset: capture.reset
+          };
+          this.tileScreenCallback(tileData);
+
+          const frameDelay = Date.now() - this.frameReceiveTimestamp;
+          this.performanceMonitor.recordRenderComplete(frameDelay);
+          this.resetConsecutiveSkipIfNeeded(capture.width, capture.height);
+          this.renderedFrameCount++;
+          if (this.renderedFrameCount <= 3 || this.renderedFrameCount % 120 === 0) {
+            hilog.debug(DOMAIN, TAG,
+              'Tile render, rendered=%{public}d, size=%{public}d x %{public}d, tiles=%{public}d, reset=%{public}s',
+              this.renderedFrameCount,
+              capture.width,
+              capture.height,
+              tileRegions.length,
+              String(capture.reset));
+          }
+        } catch (error) {
+          hilog.error(DOMAIN, TAG, 'Error in tileScreenCallback: %{public}s', error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
+
       const currentCapture = capture;
       const existingPreCapture = this.captureCache.getPreCapture();
       const canMergeToPreCapture =
@@ -842,28 +856,19 @@ export class RemoteControlService implements IRemoteControlService {
         existingPreCapture.tileHeight === currentCapture.tileHeight;
 
       if (!canMergeToPreCapture) {
-        // 重置或尺寸变化，设置新的preCapture
         this.captureCache.setPreCapture(currentCapture);
         this.performanceMonitor.recordCacheAccess(false);
       } else {
-        // 立即合并当前帧到preCapture（流式渲染）
         this.captureCache.mergeCaptureToPreCapture(currentCapture);
         this.performanceMonitor.recordCacheAccess(true);
       }
       
-      // 更新pending队列大小（新架构始终为0）
       this.performanceMonitor.setPendingQueueSize(this.captureCache.getPendingCaptureQueueSize());
 
-      // ⭐ 新架构：移除pending队列处理逻辑，直接获取preCapture渲染
       const renderCaptureCandidate = this.captureCache.getPreCapture();
       if (!renderCaptureCandidate) {
         this.skippedNoPreCaptureCount++;
         this.recordSkip('no preCapture', currentCapture.id);
-        if (this.skippedNoPreCaptureCount <= 3 || this.skippedNoPreCaptureCount % 30 === 0) {
-          hilog.warn(DOMAIN, TAG,
-            'Skip render(no preCapture), count=%{public}d, captureId=%{public}d',
-            this.skippedNoPreCaptureCount, currentCapture.id);
-        }
         this.performanceMonitor.recordSkippedFrame();
         return;
       }

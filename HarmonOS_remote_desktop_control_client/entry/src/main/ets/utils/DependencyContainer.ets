@@ -10,6 +10,8 @@ import { ILifecycleAware } from '../lifecycle/ILifecycleManager';
 export class DependencyContainer {
   private static instance: DependencyContainer;
   private dependencies: Map<string, object | (() => object)> = new Map();
+  private singletonCache: Map<string, object> = new Map();
+  private transientKeys: Set<string> = new Set();
   private lifecycleManager: LifecycleManager;
 
   /**
@@ -39,16 +41,9 @@ export class DependencyContainer {
    * @param lifecycleAware 是否为生命周期感知对象，默认为false
    */
   public register<T extends object>(key: string, factory: () => T, singleton: boolean = true, lifecycleAware: boolean = false): void {
-    if (singleton) {
-      const instance = factory();
-      this.dependencies.set(key, instance);
-      
-      // 如果是生命周期感知对象，注册到生命周期管理器
-      if (lifecycleAware && this.isLifecycleAware(instance as object)) {
-        this.lifecycleManager.register(key, instance as ILifecycleAware);
-      }
-    } else {
-      this.dependencies.set(key, factory as () => object);
+    this.dependencies.set(key, factory as () => object);
+    if (!singleton) {
+      this.transientKeys.add(key);
     }
   }
 
@@ -57,11 +52,20 @@ export class DependencyContainer {
    * @param key 依赖项的键
    * @returns T 依赖项实例
    */
+
   public get<T extends object>(key: string): T {
+    if (!this.transientKeys.has(key)) {
+      const cached = this.singletonCache.get(key);
+      if (cached !== undefined) {
+        return cached as T;
+      }
+    }
     const dependency = this.dependencies.get(key);
     if (typeof dependency === 'function') {
       const instance = (dependency as () => object)();
-      // 如果是生命周期感知对象，注册到生命周期管理器
+      if (!this.transientKeys.has(key)) {
+        this.singletonCache.set(key, instance);
+      }
       if (this.isLifecycleAware(instance)) {
         this.lifecycleManager.register(key, instance as ILifecycleAware);
       }
@@ -85,6 +89,8 @@ export class DependencyContainer {
    */
   public remove(key: string): void {
     this.dependencies.delete(key);
+    this.singletonCache.delete(key);
+    this.transientKeys.delete(key);
     this.lifecycleManager.unregister(key);
   }
 
@@ -92,11 +98,12 @@ export class DependencyContainer {
    * 清空所有依赖项
    */
   public clear(): void {
-    // 先注销所有生命周期感知对象
     for (const key of this.dependencies.keys()) {
       this.lifecycleManager.unregister(key);
     }
     this.dependencies.clear();
+    this.singletonCache.clear();
+    this.transientKeys.clear();
   }
 
   /**

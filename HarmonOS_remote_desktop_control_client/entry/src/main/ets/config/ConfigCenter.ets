@@ -455,11 +455,11 @@ export class ConfigCenter {
   }
 
   getConfig(): AppConfig {
-    return JSON.parse(JSON.stringify(this.config));
+    return this.config;
   }
 
   getServerConfig(): ServerConfig {
-    return JSON.parse(JSON.stringify(this.config.server));
+    return this.config.server;
   }
 
   /**
@@ -481,15 +481,15 @@ export class ConfigCenter {
   }
 
   getNetworkConfig(): NetworkConfig {
-    return JSON.parse(JSON.stringify(this.config.network));
+    return this.config.network;
   }
 
   getCaptureConfig(): CaptureConfig {
-    return JSON.parse(JSON.stringify(this.config.capture));
+    return this.config.capture;
   }
 
   getCaptureCacheConfig(): CaptureCacheConfig {
-    return JSON.parse(JSON.stringify(this.config.captureCache));
+    return this.config.captureCache;
   }
 
   getCaptureCacheRuntimeConfig(): CaptureCacheRuntimeConfig {
@@ -544,19 +544,19 @@ export class ConfigCenter {
   }
 
   getFileTransferConfig(): FileTransferConfig {
-    return JSON.parse(JSON.stringify(this.config.fileTransfer));
+    return this.config.fileTransfer;
   }
 
   getClipboardConfig(): ClipboardConfig {
-    return JSON.parse(JSON.stringify(this.config.clipboard));
+    return this.config.clipboard;
   }
 
   getUIConfig(): UIConfig {
-    return JSON.parse(JSON.stringify(this.config.ui));
+    return this.config.ui;
   }
 
   getLogConfig(): LogConfig {
-    return JSON.parse(JSON.stringify(this.config.log));
+    return this.config.log;
   }
 
   getHttpUrl(path: string = ''): string {

@@ -20,7 +20,14 @@ export interface CompressionConfig {
 /**
  * 命令编解码器
  */
+export interface ExtractCommandsResult {
+  remainingBuffer: ArrayBuffer;
+  commands: ConcreteCmd[];
+}
+
 export class CmdCodec {
+  private static readonly textEncoder: util.TextEncoder = new util.TextEncoder();
+  private static readonly textDecoder: util.TextDecoder = util.TextDecoder.create('utf-8');
   /**
    * 获取命令类型的ordinal值（与Java服务端保持一致）
    */
@@ -161,7 +168,7 @@ export class CmdCodec {
     const password = cmdData.password as string || '';
     
     // 将deviceCode和password转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const passwordBytes = encoder.encode(password);
     
@@ -312,7 +319,7 @@ export class CmdCodec {
     const compressionMethod = cmdData.compressionMethod as number || 0;
     
     // 将imageData转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const imageDataBytes = encoder.encode(imageData);
     
     // 计算数据长度：width(4) + height(4) + compressionMethod(4) + imageData长度(4) + imageData字节数
@@ -458,7 +465,7 @@ export class CmdCodec {
     const osName = cmdData.osName as string || 'HarmonyOS';
     
     // 将osName转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const osNameBytes = encoder.encode(osName);
     
     // 计算数据长度：screenNum(4) + osName长度(4) + osName字节数
@@ -505,7 +512,7 @@ export class CmdCodec {
     const deviceCode = cmdData.deviceCode as string || '';
     
     // 将deviceCode转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     
     // 计算数据长度：deviceCode长度(4) + deviceCode字节数
@@ -550,7 +557,7 @@ export class CmdCodec {
     const captureOp = cmdData.caputureOp as number || 0;
     
     // 将deviceCode和password转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const passwordBytes = encoder.encode(password);
     
@@ -709,7 +716,7 @@ export class CmdCodec {
     offset += 4;
     
     // keyChar (char作为UTF-16编码)
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const keyCharBytes = encoder.encode(keyChar);
     if (keyCharBytes.byteLength >= 2) {
       view.setUint16(offset, (keyCharBytes[0] << 8) | keyCharBytes[1], false);
@@ -728,7 +735,7 @@ export class CmdCodec {
     const deviceCode = cmdData.deviceCode as string || '';
     
     // 将deviceCode转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     
     // 计算数据长度：deviceCode长度(4) + deviceCode字节数
@@ -772,7 +779,7 @@ export class CmdCodec {
     const controlType = cmdData.controlType as string || '';
     
     // 将payload和controlType转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const payloadBytes = encoder.encode(text);
     const controlTypeBytes = encoder.encode(controlType);
     
@@ -826,7 +833,7 @@ export class CmdCodec {
     const controlType = cmdData.controlType as string || '';
     
     // 将字符串转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const controlTypeBytes = encoder.encode(controlType);
     
@@ -913,7 +920,7 @@ export class CmdCodec {
     const password = cmdData.password as string || '';
     
     // 将password转换为UTF-8字节数组
-    const encoder = new util.TextEncoder();
+    const encoder = CmdCodec.textEncoder;
     const passwordBytes = encoder.encode(password);
     
     // 计算数据长度：password长度(4) + password字节数
@@ -1115,7 +1122,7 @@ export class CmdCodec {
 
       // 读取 deviceCode
       const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
       console.info('CmdCodec.decodeResCliInfoCmd: deviceCode=' + deviceCode);
@@ -1511,7 +1518,7 @@ export class CmdCodec {
 
       // 读取 payload
       const payloadBytes = dataBuffer.slice(offset, offset + payloadLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const payload = decoder.decodeToString(new Uint8Array(payloadBytes));
       offset += payloadLength;
 
@@ -1559,7 +1566,7 @@ export class CmdCodec {
 
       // 读取 deviceCode
       const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
 
@@ -1613,7 +1620,7 @@ export class CmdCodec {
 
       // 读取 deviceCode
       const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
 
       // 创建命令对象
@@ -1644,7 +1651,7 @@ export class CmdCodec {
 
       // 读取 deviceCode
       const deviceCodeBytes = dataBuffer.slice(offset, offset + deviceCodeLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const deviceCode = decoder.decodeToString(new Uint8Array(deviceCodeBytes));
       offset += deviceCodeLength;
 
@@ -1698,7 +1705,7 @@ export class CmdCodec {
 
       // 读取 osName
       const osNameBytes = dataBuffer.slice(offset, offset + osNameLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const osName = decoder.decodeToString(new Uint8Array(osNameBytes));
 
       // 创建命令对象
@@ -1757,7 +1764,7 @@ export class CmdCodec {
 
       // 读取 password
       const passwordBytes = dataBuffer.slice(offset, offset + passwordLength);
-      const decoder = util.TextDecoder.create('utf-8');
+      const decoder = CmdCodec.textDecoder;
       const password = decoder.decodeToString(new Uint8Array(passwordBytes));
 
       // 创建命令对象
@@ -1773,62 +1780,50 @@ export class CmdCodec {
    * 返回 [剩余缓冲区, 命令数组]
    * 只支持二进制格式：魔数(1字节) + 命令类型(1字节) + 数据长度(4字节) + 数据体
    */
-  static extractCommands(buffer: ArrayBuffer): [ArrayBuffer, ConcreteCmd[]] {
+  static extractCommands(buffer: ArrayBuffer): ExtractCommandsResult {
     const commands: ConcreteCmd[] = [];
-    let remainingBuffer = buffer;
+    const bufferView = new Uint8Array(buffer);
+    let readOffset = 0;
+    const totalLength = bufferView.length;
     
     try {
-      console.info('CmdCodec.extractCommands: Starting, buffer size: ' + remainingBuffer.byteLength);
-      
-      while (remainingBuffer.byteLength >= 6) {
-        const view = new DataView(remainingBuffer);
+      while (readOffset + 6 <= totalLength) {
+        const view = new DataView(buffer, readOffset, totalLength - readOffset);
         const magicNumber = view.getUint8(0);
         
-        console.info('CmdCodec.extractCommands: Loop, magic=' + magicNumber + ', remaining=' + remainingBuffer.byteLength);
-        
-        // 只处理二进制格式
         if (magicNumber === 100) {
-          // 二进制格式
           const cmdTypeOrdinal = view.getUint8(1);
           const dataLength = view.getUint32(2, false);
-          const cmdLength = 6 + dataLength; // 魔数(1) + 命令类型(1) + 数据长度(4) + 数据体
+          const cmdLength = 6 + dataLength;
           
-          console.info('CmdCodec.extractCommands: Found command - typeOrdinal=' + cmdTypeOrdinal + ', dataLength=' + dataLength + ', cmdLength=' + cmdLength);
-          
-          // 检查是否有完整的数据包
-          if (remainingBuffer.byteLength < cmdLength) {
-            console.info('CmdCodec.extractCommands: Not enough data, need ' + cmdLength + ', have ' + remainingBuffer.byteLength);
+          if (readOffset + cmdLength > totalLength) {
             break;
           }
           
-          // 提取单个命令的数据
-          const cmdBuffer = remainingBuffer.slice(0, cmdLength);
-          console.info('CmdCodec.extractCommands: Decoding command buffer...');
+          const cmdBuffer = buffer.slice(readOffset, readOffset + cmdLength);
           const cmd = CmdCodec.decode(cmdBuffer);
           
           if (cmd) {
-            console.info('CmdCodec.extractCommands: Decoded command, type=' + cmd.type);
             commands.push(cmd);
-          } else {
-            console.error('CmdCodec.extractCommands: Failed to decode command');
           }
           
-          // 移动到下一个命令
-          remainingBuffer = remainingBuffer.slice(cmdLength);
-          console.info('CmdCodec.extractCommands: Moved to next, remaining=' + remainingBuffer.byteLength);
+          readOffset += cmdLength;
         } else {
-          // 不是二进制格式，跳过该字节
-          console.warn('CmdCodec.extractCommands: Invalid magic ' + magicNumber + ', skipping 1 byte');
-          remainingBuffer = remainingBuffer.slice(1);
+          readOffset += 1;
         }
       }
       
-      console.info('CmdCodec.extractCommands: Done, extracted ' + commands.length + ' commands, remaining=' + remainingBuffer.byteLength);
+      if (readOffset > 0 && readOffset < totalLength) {
+        const remaining = buffer.slice(readOffset);
+        const result: ExtractCommandsResult = { remainingBuffer: remaining, commands: commands };
+        return result;
+      }
     } catch (error) {
       console.error('CmdCodec: Failed to extract commands', error);
     }
     
-    return [remainingBuffer, commands];
+    const finalResult: ExtractCommandsResult = { remainingBuffer: buffer.slice(readOffset), commands: commands };
+    return finalResult;
   }
 
   /**

@@ -41,9 +41,18 @@ export class ObjectPool<T> {
   }
 }
 
-/**
- * 缓冲区池 - 专门用于Uint8Array的复用
- */
+export class PooledBuffer {
+  readonly data: Uint8Array;
+  readonly requestedSize: number;
+  readonly alignedSize: number;
+
+  constructor(data: Uint8Array, requestedSize: number, alignedSize: number) {
+    this.data = data;
+    this.requestedSize = requestedSize;
+    this.alignedSize = alignedSize;
+  }
+}
+
 export class BufferPool {
   private static instance: BufferPool;
   private pools: Map<number, ObjectPool<Uint8Array>> = new Map();
@@ -56,49 +65,42 @@ export class BufferPool {
     return BufferPool.instance;
   }
 
-  /**
-   * 获取缓冲区
-   */
-  acquireBuffer(size: number): Uint8Array {
-    // 对齐到4KB边界，减少池的大小
+  acquireBuffer(size: number): PooledBuffer {
     const alignedSize = Math.ceil(size / 4096) * 4096;
-    
+
     let pool = this.pools.get(alignedSize);
     if (!pool) {
       pool = new ObjectPool<Uint8Array>(
         () => {
           const buffer = new Uint8Array(alignedSize);
-          // 初始化所有像素为不透明（A=FF）
           for (let i = 0; i < alignedSize; i += 4) {
-            buffer[i] = 0xFF; // A通道设置为不透明
+            buffer[i] = 0xFF;
           }
           return buffer;
         },
-        (buf) => {}, // 移除填充操作，保持之前的内容
+        (buf) => {},
         this.maxPoolSize
       );
       this.pools.set(alignedSize, pool);
     }
 
     const buffer = pool.acquire();
-    // 返回精确大小的视图
-    return size === alignedSize ? buffer : new Uint8Array(buffer.buffer, 0, size);
+    const view = size === alignedSize ? buffer : new Uint8Array(buffer.buffer, 0, size);
+    return new PooledBuffer(view, size, alignedSize);
   }
 
-  /**
-   * 释放缓冲区
-   */
-  releaseBuffer(buffer: Uint8Array): void {
-    const alignedSize = Math.ceil(buffer.length / 4096) * 4096;
-    const pool = this.pools.get(alignedSize);
+  releaseBuffer(pooled: PooledBuffer): void {
+    const pool = this.pools.get(pooled.alignedSize);
     if (pool) {
-      pool.release(buffer);
+      if (pooled.data.length === pooled.alignedSize) {
+        pool.release(pooled.data);
+      } else {
+        const fullBuffer = new Uint8Array(pooled.data.buffer, 0, pooled.alignedSize);
+        pool.release(fullBuffer);
+      }
     }
   }
 
-  /**
-   * 清空所有池
-   */
   clear(): void {
     this.pools.forEach(pool => pool.clear());
     this.pools.clear();

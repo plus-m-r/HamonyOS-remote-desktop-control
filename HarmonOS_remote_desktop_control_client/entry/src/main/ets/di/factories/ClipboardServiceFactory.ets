@@ -1,42 +1,21 @@
-// entry/src/main/ets/di/factories/ClipboardServiceFactory.ets
-// 剪贴板服务工厂 - 创建 IClipboardService 实例
-
 import { ClipboardService } from '../../services/clipboard/ClipboardService';
 import { IClipboardService } from '../../services/interfaces/IClipboardService';
-import { configCenter } from '../../config/config';
 import { HttpRepositoryImpl } from '../../repository/HttpRepositoryImpl';
+import { configCenter } from '../../config/config';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN = 0x0001;
 const TAG = 'ClipboardServiceFactory';
 
-/**
- * 剪贴板服务工厂
- * 负责创建和配置 ClipboardService 实例
- * 返回 IClipboardService 接口类型
- */
 export class ClipboardServiceFactory {
-  /**
-   * 创建剪贴板服务实例
-   * @returns IClipboardService 实例
-   */
-  static create(): IClipboardService {
-    // 从配置中心获取基础 URL
+  static createWithSharedRepo(httpRepository: HttpRepositoryImpl): IClipboardService {
     const baseUrl = configCenter.getHttpUrl();
-
-    // 创建 HTTP 仓库
-    const httpRepository = new HttpRepositoryImpl();
-    httpRepository.setBaseUrl(baseUrl);
-
-    // 创建服务实例
     const service = new ClipboardService(httpRepository, {
-      baseUrl,
+      baseUrl: baseUrl,
       syncInterval: 1000,
       maxTextLength: 10000
     });
-
-    hilog.info(DOMAIN, TAG, 'Service created');
-
+    hilog.info(DOMAIN, TAG, 'Service created with shared repo');
     return service;
   }
 }

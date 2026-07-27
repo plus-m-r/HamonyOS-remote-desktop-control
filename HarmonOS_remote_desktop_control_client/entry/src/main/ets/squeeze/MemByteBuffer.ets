@@ -75,13 +75,8 @@ export class MemByteBuffer {
     }
     const b1 = this.buffer[this.readOffset++] & 0xFF;
     const b2 = this.buffer[this.readOffset++] & 0xFF;
-    // 与 Java 的 DataInputStream.readShort() 一致
-    // Java 的 readShort() 读取 2 个字节，大端序，返回有符号短整型
     const result = (b1 << 8) | b2;
-    // 将无符号 16 位整数转换为有符号 16 位整数
     const signedResult = result > 32767 ? result - 65536 : result;
-    hilog.debug(DOMAIN, TAG, 'readShort: b1=0x%{public}s, b2=0x%{public}s, unsigned=%{public}d, signed=%{public}d', 
-      b1.toString(16), b2.toString(16), result, signedResult);
     return signedResult;
   }
 
@@ -107,7 +102,6 @@ export class MemByteBuffer {
   }
 
   readBytes(length: number): Uint8Array {
-    hilog.debug(DOMAIN, TAG, 'readBytes requested: %{public}d, available: %{public}d', length, this.writeOffset - this.readOffset);
     if (this.readOffset + length > this.writeOffset) {
       throw new Error('Buffer underflow');
     }
@@ -155,10 +149,8 @@ export class MemByteBuffer {
    * @param value 填充值
    */
   fill(len: number, value: number): void {
-    this.ensureCapacity(this.writeOffset + len);
-    for (let i = 0; i < len; i++) {
-      this.buffer[this.writeOffset + i] = value & 0xFF;
-    }
+    this.ensureCapacity(len);
+    this.buffer.fill(value & 0xFF, this.writeOffset, this.writeOffset + len);
     this.writeOffset += len;
   }
 

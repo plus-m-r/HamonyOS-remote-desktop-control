@@ -5,6 +5,8 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {}
+  "dependencies": {
+    "@plusml/arkzero": "^1.2.0"
+  }
 }
 

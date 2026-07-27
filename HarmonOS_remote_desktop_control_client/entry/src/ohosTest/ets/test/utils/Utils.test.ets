@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from '@ohos/hypium';
-import { ObjectPool, BufferPool } from '../../../../main/ets/utils/ObjectPool';
+import { ObjectPool, BufferPool, PooledBuffer } from '../../../../main/ets/utils/ObjectPool';
 import { XYWH, getXYWH } from '../../../../main/ets/squeeze/XYWH';
 import { MemByteBuffer } from '../../../../main/ets/squeeze/MemByteBuffer';
 import { LogManager, LogLevel } from '../../../../main/ets/utils/LogManager';
@@ -93,22 +93,22 @@ export default function UtilsUnitTest() {
     });
     
     it('获取缓冲区', () => {
-      const buffer = bufferPool.acquireBuffer(1024);
-      expect(buffer).not().assertNull();
-      expect(buffer.length).assertLargerOrEqual(1024);
+      const pooled: PooledBuffer = bufferPool.acquireBuffer(1024);
+      expect(pooled).not().assertNull();
+      expect(pooled.data.length).assertLargerOrEqual(1024);
     });
     
     it('释放缓冲区', () => {
-      const buffer = bufferPool.acquireBuffer(512);
-      buffer[0] = 123;
-      bufferPool.releaseBuffer(buffer);
+      const pooled: PooledBuffer = bufferPool.acquireBuffer(512);
+      pooled.data[0] = 123;
+      bufferPool.releaseBuffer(pooled);
     });
     
     it('缓冲区大小对齐', () => {
-      const buffer1 = bufferPool.acquireBuffer(100);
-      const buffer2 = bufferPool.acquireBuffer(4097);
-      expect(buffer1.length).assertLargerOrEqual(100);
-      expect(buffer2.length).assertLargerOrEqual(4097);
+      const pooled1: PooledBuffer = bufferPool.acquireBuffer(100);
+      const pooled2: PooledBuffer = bufferPool.acquireBuffer(4097);
+      expect(pooled1.data.length).assertLargerOrEqual(100);
+      expect(pooled2.data.length).assertLargerOrEqual(4097);
     });
   });
   

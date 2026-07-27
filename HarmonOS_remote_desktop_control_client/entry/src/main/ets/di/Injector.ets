@@ -8,6 +8,7 @@ import { IClipboardService } from '../services/interfaces/IClipboardService';
 import { IConnectionManager } from '../services/connection/IConnectionManager';
 import { IProtocolHandler } from '../services/protocol/IProtocolHandler';
 import { BaseService } from './BaseService';
+import { HttpRepositoryImpl } from '../repository/HttpRepositoryImpl';
 
 const DOMAIN = 0x0001;
 const TAG = 'Injector';
@@ -22,6 +23,7 @@ export class Injector {
   private services: Map<string, BaseService> = new Map();
   private factories: Map<string, () => BaseService> = new Map();
   private isInitialized: boolean = false;
+  private sharedHttpRepo: HttpRepositoryImpl | null = null;
 
   private constructor() {}
   
@@ -138,20 +140,20 @@ export class Injector {
    */
   private async initializeFactories(): Promise<void> {
     try {
-      // 动态导入服务工厂
       const connectionManagerModule = await import('./factories/ConnectionManagerFactory');
       const protocolHandlerModule = await import('./factories/ProtocolHandlerFactory');
       const remoteControlModule = await import('./factories/RemoteControlServiceFactory');
       const clipboardModule = await import('./factories/ClipboardServiceFactory');
       const fileModule = await import('./factories/FileServiceFactory');
+      const httpRepoModule = await import('./factories/HttpRepositoryFactory');
 
       const ConnectionManagerFactory = connectionManagerModule.ConnectionManagerFactory;
       const ProtocolHandlerFactory = protocolHandlerModule.ProtocolHandlerFactory;
       const RemoteControlServiceFactory = remoteControlModule.RemoteControlServiceFactory;
       const ClipboardServiceFactory = clipboardModule.ClipboardServiceFactory;
       const FileServiceFactory = fileModule.FileServiceFactory;
+      const HttpRepositoryFactory = httpRepoModule.HttpRepositoryFactory;
 
-      // 注册服务工厂 - 返回接口类型
       this.registerFactory<IConnectionManager>(ServiceKeys.CONNECTION_MANAGER,
         () => ConnectionManagerFactory.create()
       );
@@ -164,12 +166,15 @@ export class Injector {
         () => RemoteControlServiceFactory.create()
       );
 
+      this.sharedHttpRepo = HttpRepositoryFactory.create();
+
+      const sharedRepo: HttpRepositoryImpl = this.sharedHttpRepo!;
       this.registerFactory<IClipboardService>(ServiceKeys.CLIPBOARD_SERVICE,
-        () => ClipboardServiceFactory.create()
+        () => ClipboardServiceFactory.createWithSharedRepo(sharedRepo)
       );
 
       this.registerFactory<IFileService>(ServiceKeys.FILE_SERVICE,
-        () => FileServiceFactory.create()
+        () => FileServiceFactory.createWithSharedRepo(sharedRepo)
       );
 
       hilog.info(DOMAIN, TAG, 'All service factories registered (main thread architecture)');
@@ -191,9 +196,6 @@ interface ServiceKeysType {
   PROTOCOL_HANDLER: string;
 }
 
-/**
- * 服务键常量
- */
 export const ServiceKeys: ServiceKeysType = {
   REMOTE_CONTROL_SERVICE: 'remoteControlService',
   CLIPBOARD_SERVICE: 'clipboardService',

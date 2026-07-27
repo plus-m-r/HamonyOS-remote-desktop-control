@@ -15,38 +15,33 @@ const TAG: string = 'ProtocolHandler';
  * - 使用 CmdCodec.extractCommands 进行命令提取
  */
 export class ProtocolHandler implements IProtocolHandler {
-  private receiveBuffer: ArrayBuffer = new ArrayBuffer(0);
+  private receiveBuffer: Uint8Array = new Uint8Array(0);
   private commandCallback: ((cmd: ConcreteCmd) => Promise<void>) | null = null;
 
   constructor() {
     hilog.info(DOMAIN, TAG, 'ProtocolHandler initialized (main thread)');
   }
 
-  /**
-   * 处理接收到的数据，只解析命令
-   * @param data 接收到的数据
-   * @returns 解析出的命令数组
-   */
   async processData(data: ArrayBuffer): Promise<ConcreteCmd[]> {
     try {
-      // 合并缓冲区
-      const mergedBuffer = new ArrayBuffer(this.receiveBuffer.byteLength + data.byteLength);
-      const mergedView = new Uint8Array(mergedBuffer);
-      mergedView.set(new Uint8Array(this.receiveBuffer), 0);
-      mergedView.set(new Uint8Array(data), this.receiveBuffer.byteLength);
+      const dataView = new Uint8Array(data);
+      const oldLen = this.receiveBuffer.length;
+      const newBuffer = new Uint8Array(oldLen + dataView.length);
+      newBuffer.set(this.receiveBuffer, 0);
+      newBuffer.set(dataView, oldLen);
 
       hilog.debug(DOMAIN, TAG, 'Merged buffer - existing: %{public}d, new: %{public}d, total: %{public}d',
-        this.receiveBuffer.byteLength, data.byteLength, mergedBuffer.byteLength);
+        oldLen, dataView.length, newBuffer.length);
 
-      // 提取命令
-      const result = CmdCodec.extractCommands(mergedBuffer);
-      this.receiveBuffer = result[0];
-      const commands = result[1];
+      const mergedData: ArrayBuffer = newBuffer.buffer as ArrayBuffer;
+      const result = CmdCodec.extractCommands(mergedData);
+      const remaining: ArrayBuffer = result.remainingBuffer;
+      const commands: ConcreteCmd[] = result.commands;
+      this.receiveBuffer = remaining.byteLength > 0 ? new Uint8Array(remaining) : new Uint8Array(0);
 
       hilog.debug(DOMAIN, TAG, 'Extracted %{public}d commands, remaining buffer: %{public}d bytes',
-        commands.length, this.receiveBuffer.byteLength);
+        commands.length, this.receiveBuffer.length);
 
-      // 调用回调处理每个命令
       for (let i = 0; i < commands.length; i++) {
         const cmd = commands[i];
         hilog.info(DOMAIN, TAG, 'Parsed command: %{public}s, id=%{public}d', cmd.type, cmd.id);
@@ -63,26 +58,17 @@ export class ProtocolHandler implements IProtocolHandler {
     }
   }
 
-  /**
-   * 设置命令回调
-   */
   setCommandCallback(callback: (cmd: ConcreteCmd) => Promise<void>): void {
     this.commandCallback = callback;
   }
 
-  /**
-   * 获取累积的缓冲区大小（用于调试）
-   */
   getBufferSize(): number {
-    return this.receiveBuffer.byteLength;
+    return this.receiveBuffer.length;
   }
 
-  /**
-   * 清理资源
-   */
   cleanup(): void {
     this.commandCallback = null;
-    this.receiveBuffer = new ArrayBuffer(0);
+    this.receiveBuffer = new Uint8Array(0);
     hilog.info(DOMAIN, TAG, 'ProtocolHandler cleaned up');
   }
 }
