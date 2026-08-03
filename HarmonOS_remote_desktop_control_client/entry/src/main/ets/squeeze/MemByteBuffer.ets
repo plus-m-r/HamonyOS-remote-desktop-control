@@ -22,6 +22,30 @@ export class MemByteBuffer {
     return result;
   }
 
+  /**
+   * 零拷贝包装：直接引用外部 ArrayBuffer，避免整帧拷贝
+   * 适用于解压结果等只读大数据，调用方不得对返回实例执行写入操作
+   */
+  static wrapArrayBuffer(buffer: ArrayBuffer): MemByteBuffer {
+    const result = new MemByteBuffer(0);
+    result.buffer = new Uint8Array(buffer);
+    result.writeOffset = result.buffer.length;
+    result.readOffset = 0;
+    return result;
+  }
+
+  /**
+   * 零拷贝包装 Uint8Array（视图），避免瓦片数据中间拷贝
+   * 适用于 NullRLE 直通路径，调用方不得对返回实例执行写入操作
+   */
+  static wrapUint8Array(data: Uint8Array): MemByteBuffer {
+    const result = new MemByteBuffer(0);
+    result.buffer = data;
+    result.writeOffset = data.length;
+    result.readOffset = 0;
+    return result;
+  }
+
   private ensureCapacity(needed: number): void {
     const required = this.writeOffset + needed;
     if (required > this.buffer.length) {

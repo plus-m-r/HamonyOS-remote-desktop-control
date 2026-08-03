@@ -157,7 +157,14 @@ export class Capture {
         const grayBuf: ArrayBuffer = rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset + rgba.byteLength);
         pixelData = grayBuf;
       } else {
-        const argbBuf: ArrayBuffer = src.buffer.slice(src.byteOffset, src.byteOffset + src.byteLength);
+        // 独立缓冲（单级/fromArray 瓦片）直接复用，避免整瓦片拷贝；仅视图（解压帧内切片）才需 slice
+        const rawBuffer = src.buffer;
+        let argbBuf: ArrayBuffer;
+        if (src.byteOffset === 0 && src.byteLength === rawBuffer.byteLength && rawBuffer instanceof ArrayBuffer) {
+          argbBuf = rawBuffer;
+        } else {
+          argbBuf = rawBuffer.slice(src.byteOffset, src.byteOffset + src.byteLength);
+        }
         pixelData = argbBuf;
       }
 

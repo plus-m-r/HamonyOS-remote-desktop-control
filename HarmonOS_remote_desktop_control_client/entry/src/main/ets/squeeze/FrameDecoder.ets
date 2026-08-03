@@ -71,7 +71,9 @@ export class FrameDecoder {
   }
 
   async decompress(zipped: MemByteBuffer): Promise<Capture> {
+    const tZstdStart = Date.now();
     const unzipped = await this.zstdDecompress(zipped);
+    const tZstdEnd = Date.now();
 
     unzipped.reset();
 
@@ -107,6 +109,10 @@ export class FrameDecoder {
     const dirty: (CaptureTile | null)[] = new Array(xywhArray.length).fill(null);
 
     let idx = 0;
+    let singleLevelCount = 0;
+    let cacheCount = 0;
+    let uncachedCount = 0;
+    const tMarkerStart = Date.now();
 
     while (idx < dirty.length) {
       const markerCount = unzipped.readByte();
@@ -127,6 +133,7 @@ export class FrameDecoder {
 
           if (value >= 0 && value < 256) {
             dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], value);
+            singleLevelCount++;
           } else if (value === 256) {
             const cacheId = unzipped.readInt();
             const cachedTile = this.tileCache.get(cacheId);
@@ -136,8 +143,10 @@ export class FrameDecoder {
             } else {
               dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cachedTile);
             }
+            cacheCount++;
           } else {
             this.processUncached(unzipped, xywhArray[tidx], dirty, tidx, value);
+            uncachedCount++;
           }
           processedCount++;
         }
@@ -153,6 +162,7 @@ export class FrameDecoder {
       }
     }
 
+    const tMarkerEnd = Date.now();
     const isGrayFrame = dirty.some(tile =>
       tile !== null && tile.capture !== null &&
       tile.capture.size() === tile.width * tile.height
@@ -161,8 +171,23 @@ export class FrameDecoder {
 
     this.tileCache.onCaptureProcessed();
 
+    const tParseEnd = Date.now();
+    let dirtyCount = 0;
+    for (let i = 0; i < dirty.length; i++) {
+      if (dirty[i] !== null) {
+        dirtyCount++;
+      }
+    }
+    if (this.timingLogCount % 30 === 0 || this.timingLogCount < 5) {
+      hilog.info(DOMAIN, TAG, 'decompress timing: zstd=%{public}dms marker=%{public}dms post=%{public}dms total=%{public}dms dirty=%{public}d single=%{public}d cache=%{public}d uncached=%{public}d',
+        tZstdEnd - tZstdStart, tMarkerEnd - tMarkerStart, tParseEnd - tMarkerEnd, tParseEnd - tZstdStart, dirtyCount, singleLevelCount, cacheCount, uncachedCount);
+    }
+    this.timingLogCount++;
+
     return capture;
   }
+
+  private timingLogCount: number = 0;
 
   getTileCacheSize(): number {
     return this.tileCache.size();
@@ -190,11 +215,8 @@ export class FrameDecoder {
       const buffer = zippedData.buffer.slice(zippedData.byteOffset, zippedData.byteOffset + zippedData.length) as ArrayBuffer;
       const inner = this.getZstdInner();
       const result: ArrayBuffer = await inner.decompressAsync(buffer) as ArrayBuffer;
-      const resultView = new Uint8Array(result);
-      const mbb = new MemByteBuffer(resultView.length);
-      mbb.writeBytes(resultView);
-      mbb.reset();
-      return mbb;
+      // 零拷贝：直接包装原生解压结果，避免整帧再次拷贝进新 MemByteBuffer
+      return MemByteBuffer.wrapArrayBuffer(result);
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       hilog.error(DOMAIN, TAG, 'ZSTD decompression failed: %{public}s', errorMessage);
@@ -222,8 +244,14 @@ export class FrameDecoder {
       hilog.warn(DOMAIN, TAG, 'processUncached: not enough data available: %{public}d, needed: %{public}d, using available data', available, dataLength);
       const tdata = unzipped.readBytes(available);
 
-      const out = new MemByteBuffer();
-      this.rle.runLengthDecode(out, MemByteBuffer.fromArray(tdata));
+      if (!this.useTileCache) {
+        // 缓存禁用 + NullRLE：零拷贝直通，跳过校验和
+        dirty[tidx] = CaptureTile.fromCaptureSkipChecksum(xywh, MemByteBuffer.wrapUint8Array(tdata));
+        return;
+      }
+
+      // NullRLE 下解码结果 == tdata，直接拷贝一次作为独立瓦片缓冲
+      const out = MemByteBuffer.fromArray(tdata);
 
       dirty[tidx] = CaptureTile.fromCapture(xywh, out);
       this.tileCache.add(dirty[tidx] as CaptureTile);
@@ -232,8 +260,14 @@ export class FrameDecoder {
 
     const tdata = unzipped.readBytes(dataLength);
 
-    const out = new MemByteBuffer();
-    this.rle.runLengthDecode(out, MemByteBuffer.fromArray(tdata));
+    if (!this.useTileCache) {
+      // 缓存禁用 + NullRLE（ZSTD 默认）：零拷贝直通，跳过校验和与中间拷贝
+      dirty[tidx] = CaptureTile.fromCaptureSkipChecksum(xywh, MemByteBuffer.wrapUint8Array(tdata));
+      return;
+    }
+
+    // NullRLE 下解码结果 == tdata，直接拷贝一次作为独立瓦片缓冲（避免 fromArray + runLengthDecode 两次拷贝）
+    const out = MemByteBuffer.fromArray(tdata);
 
     dirty[tidx] = CaptureTile.fromCapture(xywh, out);
     this.tileCache.add(dirty[tidx] as CaptureTile);

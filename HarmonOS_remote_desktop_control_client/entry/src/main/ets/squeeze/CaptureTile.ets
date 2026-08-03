@@ -34,16 +34,24 @@ export class CaptureTile {
     this.fromCache = fromCache;
   }
 
+  /**
+   * 单级瓦片像素缓冲共享池：相同(尺寸,级别)的瓦片内容一致，共享同一份缓冲，避免每瓦片 16KB 分配
+   */
+  private static readonly singleLevelBuffers: Map<number, MemByteBuffer> = new Map();
+
   static fromSingleLevel(xywh: XYWH, singleLevel: number): CaptureTile {
-    const data = new Uint8Array(xywh.w * xywh.h * 4);
-    for (let i = 0; i < data.length; i += 4) {
-      data[i] = singleLevel;     // B
-      data[i + 1] = singleLevel; // G
-      data[i + 2] = singleLevel; // R
-      data[i + 3] = 255;         // A
+    const pixelCount = xywh.w * xywh.h;
+    const key = pixelCount * 256 + singleLevel;
+    let capture = CaptureTile.singleLevelBuffers.get(key);
+    if (capture === undefined) {
+      // 字节序 [B,G,R,A] = [level, level, level, 255]，用 Uint32Array.fill 一次原生填充
+      const pixels = new Uint32Array(pixelCount);
+      const packed = (255 << 24) | (singleLevel << 16) | (singleLevel << 8) | singleLevel;
+      pixels.fill(packed);
+      const bytes = new Uint8Array(pixels.buffer);
+      capture = MemByteBuffer.wrapUint8Array(bytes);
+      CaptureTile.singleLevelBuffers.set(key, capture);
     }
-    const capture = MemByteBuffer.fromArray(data);
-    // 与Java端一致：单级瓦片的checksum为-1
     return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, singleLevel, false);
   }
 
@@ -51,6 +59,13 @@ export class CaptureTile {
     const data = capture.getInternal();
     const checksum = CaptureTile.computeChecksum(data);
     return new CaptureTile(checksum, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, false);
+  }
+
+  /**
+   * 跳过校验和创建瓦片（缓存禁用时避免无谓的 Adler32 计算）
+   */
+  static fromCaptureSkipChecksum(xywh: XYWH, capture: MemByteBuffer): CaptureTile {
+    return new CaptureTile(-1, xywh.x, xywh.y, xywh.w, xywh.h, capture, -1, false);
   }
 
   static fromCache(xywh: XYWH, cached: CaptureTile): CaptureTile {
