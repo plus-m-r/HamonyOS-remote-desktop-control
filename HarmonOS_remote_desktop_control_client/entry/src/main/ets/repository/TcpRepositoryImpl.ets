@@ -32,6 +32,20 @@ export class TcpRepositoryImpl implements ITcpRepository {
   async connect(config: TcpConnectionConfig): Promise<void> {
     return new Promise(async (resolve, reject) => {
       try {
+        // 重连前彻底清理旧 socket，避免旧连接残留事件（close/error）干扰新连接状态
+        if (this.tcpSocket) {
+          try {
+            this.tcpSocket.off('connect');
+            this.tcpSocket.off('message');
+            this.tcpSocket.off('error');
+            this.tcpSocket.off('close');
+            this.tcpSocket.close();
+          } catch (e) {
+            console.warn('TcpRepositoryImpl: cleanup old socket failed', e);
+          }
+          this.tcpSocket = null;
+        }
+
         this.setState(TcpConnectionState.CONNECTING);
 
         // 创建 TCP Socket
@@ -119,7 +133,9 @@ export class TcpRepositoryImpl implements ITcpRepository {
         data: buffer,
         encoding: 'buffer'
       };
-      await this.tcpSocket.send(sendOptions);
+      console.info(`TcpRepositoryImpl: Sending ${buffer.byteLength} bytes`);
+      const sent = await this.tcpSocket.send(sendOptions);
+      console.info(`TcpRepositoryImpl: Send ok, result=${String(sent)}`);
     } catch (error) {
       console.error('TcpRepositoryImpl: Failed to send data', error);
       throw new Error(String(error));

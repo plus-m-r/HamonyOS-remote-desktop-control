@@ -36,6 +36,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 
 /**
  * @author ZhouNing
@@ -116,6 +117,7 @@ public class RemoteClient extends RemoteFrame {
         bootstrap.group(group).channel(NioSocketChannel.class).option(ChannelOption.TCP_NODELAY, true).option(ChannelOption.SO_KEEPALIVE, true).handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(SocketChannel socketChannel) throws Exception {
+                socketChannel.pipeline().addLast(new LengthFieldBasedFrameDecoder(10485760, 3, 4, 0, 0));
                 socketChannel.pipeline().addLast(new NettyDecoder());
                 socketChannel.pipeline().addLast(new NettyEncoder());
                 socketChannel.pipeline().addLast(new RemoteStateIdleHandler());

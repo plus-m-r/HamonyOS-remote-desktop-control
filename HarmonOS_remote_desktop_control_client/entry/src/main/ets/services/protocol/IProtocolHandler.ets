@@ -22,8 +22,7 @@ export interface IProtocolHandler {
    */
   getBufferSize(): number;
 
-  /**
-   * 清理资源
-   */
+  reset(): void;
+
   cleanup(): void;
 }

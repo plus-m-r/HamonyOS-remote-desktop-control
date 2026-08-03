@@ -23,6 +23,7 @@ export interface CompressionConfig {
 export interface ExtractCommandsResult {
   remainingBuffer: ArrayBuffer;
   commands: ConcreteCmd[];
+  protocolError: boolean;
 }
 
 export class CmdCodec {
@@ -122,20 +123,14 @@ export class CmdCodec {
    * 编码心跳请求命令
    */
   private static encodePingCmd(): ArrayBuffer {
-    // 心跳命令格式：魔数(1) + 命令类型(1) + 数据长度(4) = 6字节
-    const buffer = new ArrayBuffer(6);
+    const buffer = new ArrayBuffer(7);
     const view = new DataView(buffer);
-    
-    // 魔数：100（与Java服务端一致）
-    view.setUint8(0, 100);
-    
-    // 命令类型：ReqPing的ordinal值
+    let offset = 0;
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqPing);
-    view.setUint8(1, cmdTypeOrdinal);
-    
-    // 数据长度：心跳命令没有额外数据
-    view.setUint32(2, 0, false);
-    
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, 0, false);
     return buffer;
   }
 
@@ -143,20 +138,14 @@ export class CmdCodec {
    * 编码心跳响应命令
    */
   private static encodePongCmd(): ArrayBuffer {
-    // 心跳响应命令格式：魔数(1) + 命令类型(1) + 数据长度(4) = 6字节
-    const buffer = new ArrayBuffer(6);
+    const buffer = new ArrayBuffer(7);
     const view = new DataView(buffer);
-    
-    // 魔数：100
-    view.setUint8(0, 100);
-    
-    // 命令类型：ResPong的ordinal值
+    let offset = 0;
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ResPong);
-    view.setUint8(1, cmdTypeOrdinal);
-    
-    // 数据长度：心跳响应命令没有额外数据
-    view.setUint32(2, 0, false);
-    
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, 0, false);
     return buffer;
   }
 
@@ -166,50 +155,24 @@ export class CmdCodec {
   private static encodeResCliInfoCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
     const password = cmdData.password as string || '';
-    
-    // 将deviceCode和password转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const passwordBytes = encoder.encode(password);
-    
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + password长度(4) + password字节数
     const dataLength = 4 + deviceCodeBytes.byteLength + 4 + passwordBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ResCliInfo的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ResCliInfo);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
-    offset += 4;
-    
-    // deviceCode字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, deviceCodeBytes.byteLength, false); offset += 4;
     const deviceCodeView = new Uint8Array(buffer, offset);
-    deviceCodeView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
-    
-    // password长度
-    view.setUint32(offset, passwordBytes.byteLength, false);
-    offset += 4;
-    
-    // password字节
+    deviceCodeView.set(deviceCodeBytes); offset += deviceCodeBytes.byteLength;
+    view.setUint32(offset, passwordBytes.byteLength, false); offset += 4;
     const passwordView = new Uint8Array(buffer, offset);
     passwordView.set(passwordBytes);
-    
     return buffer;
   }
 
@@ -218,31 +181,16 @@ export class CmdCodec {
    */
   private static encodeResOpenCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const status = cmdData.status as number || 0;
-    
-    // 计算数据长度：status(1)
     const dataLength = 1;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ResOpen的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ResOpen);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // status
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
     view.setUint8(offset, status);
-    
     return buffer;
   }
 
@@ -253,35 +201,17 @@ export class CmdCodec {
   private static encodeResCaptureCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const status = cmdData.status as number || 0;
     const screenNum = cmdData.screenNum as number || 1;
-    
-    // 计算数据长度：status(1) + screenNum(4)
     const dataLength = 1 + 4;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ResCapture的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ResCapture);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // status
-    view.setUint8(offset, status);
-    offset += 1;
-    
-    // screenNum
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint8(offset, status); offset += 1;
     view.setInt32(offset, screenNum, false);
-    
     return buffer;
   }
 
@@ -289,23 +219,14 @@ export class CmdCodec {
    * 编码响应远程剪贴板命令
    */
   private static encodeResRemoteClipboardCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    // 响应远程剪贴板命令没有额外数据
-    const dataLength = 0;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) = 6字节
-    const buffer = new ArrayBuffer(6);
+    const buffer = new ArrayBuffer(7);
     const view = new DataView(buffer);
-    
-    // 魔数：100
-    view.setUint8(0, 100);
-    
-    // 命令类型：ResRemoteClipboard的ordinal值
+    let offset = 0;
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ResRemoteClipboard);
-    view.setUint8(1, cmdTypeOrdinal);
-    
-    // 数据长度：没有额外数据
-    view.setUint32(2, dataLength, false);
-    
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, 0, false);
     return buffer;
   }
 
@@ -317,52 +238,23 @@ export class CmdCodec {
     const width = cmdData.width as number || 0;
     const height = cmdData.height as number || 0;
     const compressionMethod = cmdData.compressionMethod as number || 0;
-    
-    // 将imageData转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const imageDataBytes = encoder.encode(imageData);
-    
-    // 计算数据长度：width(4) + height(4) + compressionMethod(4) + imageData长度(4) + imageData字节数
     const dataLength = 4 + 4 + 4 + 4 + imageDataBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：Capture的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.Capture);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // width
-    view.setInt32(offset, width, false);
-    offset += 4;
-    
-    // height
-    view.setInt32(offset, height, false);
-    offset += 4;
-    
-    // compressionMethod
-    view.setInt32(offset, compressionMethod, false);
-    offset += 4;
-    
-    // imageData长度
-    view.setUint32(offset, imageDataBytes.byteLength, false);
-    offset += 4;
-    
-    // imageData字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setInt32(offset, width, false); offset += 4;
+    view.setInt32(offset, height, false); offset += 4;
+    view.setInt32(offset, compressionMethod, false); offset += 4;
+    view.setUint32(offset, imageDataBytes.byteLength, false); offset += 4;
     const imageDataView = new Uint8Array(buffer, offset);
     imageDataView.set(imageDataBytes);
-    
     return buffer;
   }
 
@@ -370,90 +262,46 @@ export class CmdCodec {
    * 编码屏幕捕获配置命令
    */
   private static encodeCaptureConfigCmd(cmdData: Record<string, Object>): ArrayBuffer {
-    const quantization = cmdData.quality as number || 6; // Gray8Bits enum (0-6)
+    const quantization = cmdData.quality as number || 6;
     const captureTick = cmdData.captureFrequency as number || 30;
-    const captureColors = (cmdData.maxFps as number) === 1 ? 1 : 0; // use maxFps as flag for colors
-    
-    // 计算数据长度：quantization(4) + captureTick(4) + captureColors(2)
+    const captureColors = (cmdData.maxFps as number) === 1 ? 1 : 0;
     const dataLength = 4 + 4 + 2;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：CaptureConfig的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.CaptureConfig);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // quantization (int enum)
-    view.setInt32(offset, quantization, false);
-    offset += 4;
-    
-    // captureTick (int)
-    view.setInt32(offset, captureTick, false);
-    offset += 4;
-    
-    // captureColors (short, 1=true, 0=false)
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setInt32(offset, quantization, false); offset += 4;
+    view.setInt32(offset, captureTick, false); offset += 4;
     view.setInt16(offset, captureColors, false);
-    
     return buffer;
   }
 
   /**
    * 编码压缩配置命令
+   * 与 Java 端 CmdCompressorConf 线格式一致：compressionMethod(1) + useCache(1) + cacheMaxSize(4) + cachePurgeSize(4)
    */
   private static encodeCompressorConfigCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const compressionMethod = cmdData.compressionMethod as number || 0;
     const useCache = (cmdData.useCache as boolean) !== false ? 1 : 0;
     const cacheMaxSize = cmdData.cacheMaxSize as number || 1000;
     const cachePurgeSize = cmdData.cachePurgeSize as number || 500;
-    
-    // 计算数据长度：compressionMethod(4) + useCache(1) + cacheMaxSize(4) + cachePurgeSize(4) = 13
-    const dataLength = 4 + 1 + 4 + 4;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const dataLength = 1 + 1 + 4 + 4;
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：CompressorConfig的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.CompressorConfig);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // compressionMethod (int)
-    view.setInt32(offset, compressionMethod, false);
-    offset += 4;
-    
-    // useCache (byte)
-    view.setUint8(offset, useCache);
-    offset += 1;
-    
-    // cacheMaxSize (int)
-    view.setInt32(offset, cacheMaxSize, false);
-    offset += 4;
-    
-    // cachePurgeSize (int)
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint8(offset, compressionMethod & 0xFF); offset += 1;
+    view.setUint8(offset, useCache); offset += 1;
+    view.setInt32(offset, cacheMaxSize, false); offset += 4;
     view.setInt32(offset, cachePurgeSize, false);
-    
     return buffer;
   }
 
@@ -463,44 +311,21 @@ export class CmdCodec {
   private static encodeReqCliInfoCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const screenNum = cmdData.screenNum as number || 1;
     const osName = cmdData.osName as string || 'HarmonyOS';
-    
-    // 将osName转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const osNameBytes = encoder.encode(osName);
-    
-    // 计算数据长度：screenNum(4) + osName长度(4) + osName字节数
     const dataLength = 4 + 4 + osNameBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ReqCliInfo的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqCliInfo);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // screenNum
-    view.setInt32(offset, screenNum, false);
-    offset += 4;
-    
-    // osName长度
-    view.setUint32(offset, osNameBytes.byteLength, false);
-    offset += 4;
-    
-    // osName字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setInt32(offset, screenNum, false); offset += 4;
+    view.setUint32(offset, osNameBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
     dataView.set(osNameBytes);
-    
     return buffer;
   }
 
@@ -510,40 +335,20 @@ export class CmdCodec {
    */
   private static encodeReqOpenCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
-    
-    // 将deviceCode转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
-    
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数
     const dataLength = 4 + deviceCodeBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ReqOpen的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqOpen);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
-    offset += 4;
-    
-    // deviceCode字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, deviceCodeBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
     dataView.set(deviceCodeBytes);
-    
     return buffer;
   }
 
@@ -555,54 +360,25 @@ export class CmdCodec {
     const deviceCode = cmdData.deviceCode as string || '';
     const password = cmdData.password as string || '';
     const captureOp = cmdData.caputureOp as number || 0;
-    
-    // 将deviceCode和password转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const passwordBytes = encoder.encode(password);
-    
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + captureOp(1) + password长度(4) + password字节数
     const dataLength = 4 + deviceCodeBytes.byteLength + 1 + 4 + passwordBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ReqCapture的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqCapture);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
-    offset += 4;
-    
-    // deviceCode字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, deviceCodeBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
-    dataView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
-    
-    // captureOp
-    view.setUint8(offset, captureOp);
-    offset += 1;
-    
-    // password长度
-    view.setUint32(offset, passwordBytes.byteLength, false);
-    offset += 4;
-    
-    // password字节
+    dataView.set(deviceCodeBytes); offset += deviceCodeBytes.byteLength;
+    view.setUint8(offset, captureOp); offset += 1;
+    view.setUint32(offset, passwordBytes.byteLength, false); offset += 4;
     const passwordView = new Uint8Array(buffer, offset);
     passwordView.set(passwordBytes);
-    
     return buffer;
   }
 
@@ -615,60 +391,32 @@ export class CmdCodec {
     const y = cmdData.y as number || 0;
     const action = cmdData.action as number || 0;
     const wheelDelta = cmdData.wheelDelta as number || 0;
-    
-    // 计算info值
     let info = 0;
     const isWheel = wheelDelta !== undefined && wheelDelta !== 0;
-    
     if (isWheel) {
-      info = 1 << 5; // WHEEL flag
+      info = 1 << 5;
     } else {
-      // 简单映射：action=0表示移动，action=1表示按下BUTTON1
       if (action === 1) {
-        info = (1 << 2) | 1; // BUTTON1 | PRESSED
+        info = (1 << 2) | 1;
       } else if (action === 2) {
-        info = (1 << 2) | (1 << 1); // BUTTON1 | RELEASED
+        info = (1 << 2) | (1 << 1);
       }
     }
-    
-    // 计算数据长度
     const dataLength = isWheel ? 12 : 8;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：MouseControl的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.MouseControl);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // x坐标 (short)
-    view.setInt16(offset, x, false);
-    offset += 2;
-    
-    // y坐标 (short)
-    view.setInt16(offset, y, false);
-    offset += 2;
-    
-    // info
-    view.setInt32(offset, info, false);
-    offset += 4;
-    
-    // rotations (wheelDelta) - 可选
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setInt16(offset, x, false); offset += 2;
+    view.setInt16(offset, y, false); offset += 2;
+    view.setInt32(offset, info, false); offset += 4;
     if (isWheel) {
       view.setInt32(offset, wheelDelta, false);
     }
-    
     return buffer;
   }
 
@@ -678,44 +426,20 @@ export class CmdCodec {
    */
   private static encodeKeyControlCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const keyCode = cmdData.keyCode as number || 0;
-    const pressed = cmdData.pressed as boolean ? 1 : 2; // 1=PRESSED, 2=RELEASED
-    
-    // 计算info值
+    const pressed = cmdData.pressed as boolean ? 1 : 2;
     const info = pressed;
-    
-    // keyChar - 暂时使用空格字符
     const keyChar = ' ';
-    
-    // 数据长度总是10
     const dataLength = 10;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：KeyControl的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.KeyControl);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // info
-    view.setInt32(offset, info, false);
-    offset += 4;
-    
-    // keyCode
-    view.setInt32(offset, keyCode, false);
-    offset += 4;
-    
-    // keyChar (char作为UTF-16编码)
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setInt32(offset, info, false); offset += 4;
+    view.setInt32(offset, keyCode, false); offset += 4;
     const encoder = CmdCodec.textEncoder;
     const keyCharBytes = encoder.encode(keyChar);
     if (keyCharBytes.byteLength >= 2) {
@@ -723,7 +447,6 @@ export class CmdCodec {
     } else if (keyCharBytes.byteLength === 1) {
       view.setUint16(offset, keyCharBytes[0], false);
     }
-    
     return buffer;
   }
 
@@ -733,40 +456,20 @@ export class CmdCodec {
    */
   private static encodeClipboardRequestCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
-    
-    // 将deviceCode转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
-    
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数
     const dataLength = 4 + deviceCodeBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ReqRemoteClipboard的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ReqRemoteClipboard);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
-    offset += 4;
-    
-    // deviceCode字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, deviceCodeBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
     dataView.set(deviceCodeBytes);
-    
     return buffer;
   }
 
@@ -777,50 +480,24 @@ export class CmdCodec {
   private static encodeClipboardTextCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const text = cmdData.text as string || '';
     const controlType = cmdData.controlType as string || '';
-    
-    // 将payload和controlType转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const payloadBytes = encoder.encode(text);
     const controlTypeBytes = encoder.encode(controlType);
-    
-    // 计算数据长度：payload长度(4) + payload字节数 + controlType长度(4) + controlType字节数
     const dataLength = 4 + payloadBytes.byteLength + 4 + controlTypeBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ClipboardText的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ClipboardText);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // payload长度
-    view.setUint32(offset, payloadBytes.byteLength, false);
-    offset += 4;
-    
-    // payload字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, payloadBytes.byteLength, false); offset += 4;
     const payloadView = new Uint8Array(buffer, offset);
-    payloadView.set(payloadBytes);
-    offset += payloadBytes.byteLength;
-    
-    // controlType长度
-    view.setUint32(offset, controlTypeBytes.byteLength, false);
-    offset += 4;
-    
-    // controlType字节
+    payloadView.set(payloadBytes); offset += payloadBytes.byteLength;
+    view.setUint32(offset, controlTypeBytes.byteLength, false); offset += 4;
     const controlTypeView = new Uint8Array(buffer, offset);
     controlTypeView.set(controlTypeBytes);
-    
     return buffer;
   }
 
@@ -831,50 +508,24 @@ export class CmdCodec {
   private static encodeClipboardTransferCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const deviceCode = cmdData.deviceCode as string || '';
     const controlType = cmdData.controlType as string || '';
-    
-    // 将字符串转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const deviceCodeBytes = encoder.encode(deviceCode);
     const controlTypeBytes = encoder.encode(controlType);
-    
-    // 计算数据长度：deviceCode长度(4) + deviceCode字节数 + controlType长度(4) + controlType字节数
     const dataLength = 4 + deviceCodeBytes.byteLength + 4 + controlTypeBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ClipboardTransfer的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ClipboardTransfer);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // deviceCode长度
-    view.setUint32(offset, deviceCodeBytes.byteLength, false);
-    offset += 4;
-    
-    // deviceCode字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, deviceCodeBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
-    dataView.set(deviceCodeBytes);
-    offset += deviceCodeBytes.byteLength;
-    
-    // controlType长度
-    view.setUint32(offset, controlTypeBytes.byteLength, false);
-    offset += 4;
-    
-    // controlType字节
+    dataView.set(deviceCodeBytes); offset += deviceCodeBytes.byteLength;
+    view.setUint32(offset, controlTypeBytes.byteLength, false); offset += 4;
     const controlTypeView = new Uint8Array(buffer, offset);
     controlTypeView.set(controlTypeBytes);
-    
     return buffer;
   }
 
@@ -884,31 +535,16 @@ export class CmdCodec {
    */
   private static encodeSelectScreenCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const screenIndex = cmdData.screenIndex as number || 0;
-    
-    // 计算数据长度：screenIndex(4)
     const dataLength = 4;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：SelectScreen的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.SelectScreen);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // screenIndex
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
     view.setInt32(offset, screenIndex, false);
-    
     return buffer;
   }
 
@@ -918,40 +554,20 @@ export class CmdCodec {
    */
   private static encodeChangePwdCmd(cmdData: Record<string, Object>): ArrayBuffer {
     const password = cmdData.password as string || '';
-    
-    // 将password转换为UTF-8字节数组
     const encoder = CmdCodec.textEncoder;
     const passwordBytes = encoder.encode(password);
-    
-    // 计算数据长度：password长度(4) + password字节数
     const dataLength = 4 + passwordBytes.byteLength;
-    
-    // 总缓冲区大小：魔数(1) + 命令类型(1) + 数据长度(4) + 数据
-    const buffer = new ArrayBuffer(1 + 1 + 4 + dataLength);
+    const buffer = new ArrayBuffer(2 + 1 + 4 + dataLength);
     const view = new DataView(buffer);
     let offset = 0;
-    
-    // 魔数：100
-    view.setUint8(offset, 100);
-    offset += 1;
-    
-    // 命令类型：ChangePwd的ordinal值
+    view.setUint8(offset, 0x64); offset += 1;
+    view.setUint8(offset, 0x33); offset += 1;
     const cmdTypeOrdinal = CmdCodec.getCmdTypeOrdinal(CmdType.ChangePwd);
-    view.setUint8(offset, cmdTypeOrdinal);
-    offset += 1;
-    
-    // 数据长度
-    view.setUint32(offset, dataLength, false);
-    offset += 4;
-    
-    // password长度
-    view.setUint32(offset, passwordBytes.byteLength, false);
-    offset += 4;
-    
-    // password字节
+    view.setUint8(offset, cmdTypeOrdinal); offset += 1;
+    view.setUint32(offset, dataLength, false); offset += 4;
+    view.setUint32(offset, passwordBytes.byteLength, false); offset += 4;
     const dataView = new Uint8Array(buffer, offset);
     dataView.set(passwordBytes);
-    
     return buffer;
   }
 
@@ -961,40 +577,21 @@ export class CmdCodec {
    */
   static decode(buffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      console.info('CmdCodec.decode: Starting, buffer size=' + buffer.byteLength);
-      
-      if (buffer.byteLength < 6) {
-        console.error('CmdCodec: Buffer too short for decoding');
+      if (buffer.byteLength < 7) {
         return undefined;
       }
-      
       const view = new DataView(buffer);
-      
-      // 检查魔数，必须为二进制格式
-      const magicNumber = view.getUint8(0);
-      
-      console.info('CmdCodec.decode: magic=' + magicNumber);
-      
-      if (magicNumber !== 100) {
-        console.error('CmdCodec: Invalid magic number, only binary format is supported');
+      const magic0 = view.getUint8(0);
+      const magic1 = view.getUint8(1);
+      if (magic0 !== 0x64 || magic1 !== 0x33) {
         return undefined;
       }
-      
-      // 二进制格式：魔数(1) + 命令类型(1) + 数据长度(4) + 数据体
-      const cmdTypeOrdinal = view.getUint8(1);
-      const dataLength = view.getUint32(2, false);
-      
-      console.info('CmdCodec.decode: cmdTypeOrdinal=' + cmdTypeOrdinal + ', dataLength=' + dataLength);
-      
-      if (buffer.byteLength < 6 + dataLength) {
-        console.error('CmdCodec: Binary format incomplete data, need ' + (6 + dataLength) + ', have ' + buffer.byteLength);
+      const cmdTypeOrdinal = view.getUint8(2);
+      const dataLength = view.getUint32(3, false);
+      if (buffer.byteLength < 7 + dataLength) {
         return undefined;
       }
-      
-      // 根据命令类型解码
-      console.info('CmdCodec.decode: Calling decodeBinaryCommand...');
-      const result = CmdCodec.decodeBinaryCommand(cmdTypeOrdinal, buffer.slice(6, 6 + dataLength));
-      console.info('CmdCodec.decode: decodeBinaryCommand returned: ' + (result ? 'success' : 'undefined'));
+      const result = CmdCodec.decodeBinaryCommand(cmdTypeOrdinal, buffer.slice(7, 7 + dataLength));
       return result;
     } catch (error) {
       console.error('CmdCodec: Failed to decode command', error);
@@ -1367,11 +964,11 @@ export class CmdCodec {
 
   /**
    * 解码 CompressorConfig 命令（二进制格式）
-   * 格式：compressionMethod(4) + compressionLevel(4)
+   * 与 Java 端 CmdCompressorConf 线格式一致：compressionMethod(1) + useCache(1) + cacheMaxSize(4) + cachePurgeSize(4)
    */
   private static decodeCompressorConfigCmd(dataBuffer: ArrayBuffer): ConcreteCmd | undefined {
     try {
-      if (dataBuffer.byteLength < 13) {
+      if (dataBuffer.byteLength < 10) {
         console.error('CmdCodec: CompressorConfig data buffer too short');
         return undefined;
       }
@@ -1379,8 +976,8 @@ export class CmdCodec {
       const view = new DataView(dataBuffer);
       let offset = 0;
       
-      const compressionMethod = view.getInt32(offset, false);
-      offset += 4;
+      const compressionMethod = view.getUint8(offset);
+      offset += 1;
       
       const useCache = view.getUint8(offset) === 1;
       offset += 1;
@@ -1780,50 +1377,47 @@ export class CmdCodec {
    * 返回 [剩余缓冲区, 命令数组]
    * 只支持二进制格式：魔数(1字节) + 命令类型(1字节) + 数据长度(4字节) + 数据体
    */
+  private static readonly MAX_CMD_DATA_LENGTH: number = 10 * 1024 * 1024;
+  private static readonly MAX_CMD_TYPE_ORDINAL: number = 18;
+
   static extractCommands(buffer: ArrayBuffer): ExtractCommandsResult {
     const commands: ConcreteCmd[] = [];
-    const bufferView = new Uint8Array(buffer);
     let readOffset = 0;
-    const totalLength = bufferView.length;
-    
+    const totalLength = new Uint8Array(buffer).length;
+    const view = new Uint8Array(buffer);
+
     try {
-      while (readOffset + 6 <= totalLength) {
-        const view = new DataView(buffer, readOffset, totalLength - readOffset);
-        const magicNumber = view.getUint8(0);
-        
-        if (magicNumber === 100) {
-          const cmdTypeOrdinal = view.getUint8(1);
-          const dataLength = view.getUint32(2, false);
-          const cmdLength = 6 + dataLength;
-          
-          if (readOffset + cmdLength > totalLength) {
-            break;
+      while (readOffset + 7 <= totalLength) {
+        if (view[readOffset] === 0x64 && view[readOffset + 1] === 0x33) {
+          const headerView = new DataView(buffer, readOffset, totalLength - readOffset);
+          const cmdTypeOrdinal = headerView.getUint8(2);
+          const wireSize = headerView.getUint32(3, false);
+
+          if (cmdTypeOrdinal <= CmdCodec.MAX_CMD_TYPE_ORDINAL && wireSize <= CmdCodec.MAX_CMD_DATA_LENGTH) {
+            const frameLength = 7 + wireSize;
+            if (readOffset + frameLength <= totalLength) {
+              const cmdBuffer = buffer.slice(readOffset, readOffset + frameLength);
+              const cmd = CmdCodec.decode(cmdBuffer);
+              if (cmd) {
+                commands.push(cmd);
+                readOffset += frameLength;
+                continue;
+              }
+            } else {
+              break;
+            }
           }
-          
-          const cmdBuffer = buffer.slice(readOffset, readOffset + cmdLength);
-          const cmd = CmdCodec.decode(cmdBuffer);
-          
-          if (cmd) {
-            commands.push(cmd);
-          }
-          
-          readOffset += cmdLength;
-        } else {
-          readOffset += 1;
         }
+        readOffset += 1;
       }
-      
-      if (readOffset > 0 && readOffset < totalLength) {
-        const remaining = buffer.slice(readOffset);
-        const result: ExtractCommandsResult = { remainingBuffer: remaining, commands: commands };
-        return result;
-      }
+
+      const remaining = readOffset < totalLength ? buffer.slice(readOffset) : new ArrayBuffer(0);
+      return { remainingBuffer: remaining, commands: commands, protocolError: false };
     } catch (error) {
       console.error('CmdCodec: Failed to extract commands', error);
+      const remaining = readOffset < totalLength ? buffer.slice(readOffset) : new ArrayBuffer(0);
+      return { remainingBuffer: remaining, commands: commands, protocolError: false };
     }
-    
-    const finalResult: ExtractCommandsResult = { remainingBuffer: buffer.slice(readOffset), commands: commands };
-    return finalResult;
   }
 
   /**

@@ -225,9 +225,21 @@ struct Index {
       Text('远程桌面控制')
         .fontSize(24)
         .fontWeight(FontWeight.Bold)
-        .margin({ top: 40, bottom: 20 })
+        .margin({ top: 40, bottom: 8 })
         .width('100%')
         .textAlign(TextAlign.Center);
+
+      Button('渲染测试')
+        .fontSize(12)
+        .fontColor('#6B7280')
+        .backgroundColor('#E5E7EB')
+        .borderRadius(16)
+        .height(28)
+        .padding({ left: 16, right: 16 })
+        .margin({ bottom: 16 })
+        .onClick(() => {
+          this.routerPushUrl('pages/RenderTest');
+        })
 
       Row() {
         this.buildCard('我的设备信息', '用于他人连接到此设备', true);

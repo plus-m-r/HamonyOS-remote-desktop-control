@@ -55,5 +55,6 @@ export interface IRemoteControlService {
   sendClipboardFile(fileInfoId: string, fileName: string): Promise<void>;
   setClipboardCallback(callback: ClipboardCallback): void;
   changePassword(oldPassword: string, newPassword: string): Promise<void>;
+  updateConnectionTarget(host: string, port: number): void;
   cleanup(): void;
 }

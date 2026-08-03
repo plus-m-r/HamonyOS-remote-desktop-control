@@ -16,7 +16,7 @@ import static java.lang.String.format;
 public class NettyDecoder extends ByteToMessageDecoder {
     @Override
     protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception {
-        if (byteBuf.readableBytes() < 6) {
+        if (byteBuf.readableBytes() < 7) {
             return;
         }
         byteBuf.markReaderIndex();

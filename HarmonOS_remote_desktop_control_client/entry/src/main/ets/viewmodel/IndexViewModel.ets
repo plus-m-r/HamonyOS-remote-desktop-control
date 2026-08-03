@@ -450,12 +450,20 @@ export class IndexViewModel {
     this.showToast('正在重新连接...');
     
     try {
-      // ⭐⭐⭐ 关键：先更新 ConfigCenter 中的服务器IP配置
+      this.updateState({
+        waitingForServerInfo: true,
+        userId: '',
+        userPassword: ''
+      });
+      
       const configCenter = ConfigCenter.getInstance();
       configCenter.updateServerHost(ip);
       hilog.info(DOMAIN, TAG, '已更新 ConfigCenter 服务器IP配置');
       
-      // 断开当前连接
+      const tcpPort = configCenter.getServerConfig().tcpPort;
+      this.remoteControlService.updateConnectionTarget(ip, tcpPort);
+      hilog.info(DOMAIN, TAG, '已更新 ConnectionManager 连接目标');
+      
       await this.remoteControlService.disconnect();
       
       // 等待一下确保完全断开

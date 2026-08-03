@@ -20,13 +20,13 @@ const TAG = 'ControlPage';
 const DOMAIN = 0x0000;
 const PANEL_WIDTH = 280;
 
-let _viewModel: ControlViewModel | null = null;
-let _renderSession: ArkZeroRenderSession | null = null;
+const INITIAL_RENDER_WIDTH = 1920;
+const INITIAL_RENDER_HEIGHT = 1080;
 
 @Entry
 @Component
 struct Control {
-  private viewModel!: ControlViewModel;
+  private viewModel: ControlViewModel | null = null;
 
   @State private state: ControlPageState = {
     connectionState: 0,
@@ -45,10 +45,10 @@ struct Control {
     isRendererReady: false
   };
 
-  @State private surfaceViewConfig: SurfaceViewConfig = {
-    renderWidth: 640,
-    renderHeight: 480,
-    format: PixelFormat.RGBA,
+  private surfaceViewConfig: SurfaceViewConfig = {
+    renderWidth: INITIAL_RENDER_WIDTH,
+    renderHeight: INITIAL_RENDER_HEIGHT,
+    format: PixelFormat.BGRA,
     originRatioX: 0.0,
     originRatioY: 0.0,
     sizeRatioX: 1.0,
@@ -64,49 +64,51 @@ struct Control {
 
   constructor() {
     super()
-    _viewModel = new ControlViewModel({
-      remoteControlService: ServiceProvider.remoteControlService,
-      fileService: ServiceProvider.fileService,
-      clipboardService: ServiceProvider.clipboardService
-    });
-    this.viewModel = _viewModel;
-
-    _viewModel.subscribe((newState: ControlPageState) => {
-      this.state = newState;
-      this.panelTranslateX = newState.isPanelVisible ? 0 : PANEL_WIDTH;
-    });
-
-    _viewModel.setToastCallback((message: string, duration?: number) => {
-      this.showToast(message, duration);
-    });
-
-    _viewModel.setNavigationCallback((url: string) => {
-      this.routerPushUrl(url);
-    });
-
-    _viewModel.setBackCallback(() => {
-      this.routerBack();
-    });
   }
 
   aboutToAppear(): void {
-    hilog.info(DOMAIN, TAG, 'Control page loading');
+    hilog.info(DOMAIN, TAG, 'Control page aboutToAppear');
 
     try {
+      const vm = new ControlViewModel({
+        remoteControlService: ServiceProvider.remoteControlService,
+        fileService: ServiceProvider.fileService,
+        clipboardService: ServiceProvider.clipboardService
+      });
+      this.viewModel = vm;
+      hilog.info(DOMAIN, TAG, 'ViewModel created');
+
+      vm.subscribe((newState: ControlPageState) => {
+        this.state = newState;
+        this.panelTranslateX = newState.isPanelVisible ? 0 : PANEL_WIDTH;
+      });
+
+      vm.setToastCallback((message: string, duration?: number) => {
+        this.showToast(message, duration);
+      });
+
+      vm.setNavigationCallback((url: string) => {
+        this.routerPushUrl(url);
+      });
+
+      vm.setBackCallback(() => {
+        this.routerBack();
+      });
+
       const sessionConfig: RenderSessionConfig = {
-        width: this.surfaceViewConfig.renderWidth,
-        height: this.surfaceViewConfig.renderHeight,
-        format: PixelFormat.RGBA,
+        width: INITIAL_RENDER_WIDTH,
+        height: INITIAL_RENDER_HEIGHT,
+        format: PixelFormat.BGRA,
         onError: (errorMsg: string) => {
           hilog.error(DOMAIN, TAG, 'RenderSession error: %{public}s', errorMsg);
         }
       };
-      _renderSession = new ArkZeroRenderSession(sessionConfig);
-      this.renderSession = _renderSession;
-      _viewModel!.setRenderSession(_renderSession);
 
-      const vm: ControlViewModel = _viewModel!;
-      const session: ArkZeroRenderSession = _renderSession;
+      const session = new ArkZeroRenderSession(sessionConfig);
+      this.renderSession = session;
+      hilog.info(DOMAIN, TAG, 'RenderSession created');
+
+      vm.setRenderSession(session);
 
       this.touchHandlerFn = (event: NormalizedTouchEvent) => {
         if (event.touches.length === 0) {
@@ -136,19 +138,6 @@ struct Control {
         });
       };
 
-      _viewModel!.setResolutionChangeCallback((width: number, height: number) => {
-        this.surfaceViewConfig = {
-          renderWidth: width,
-          renderHeight: height,
-          format: PixelFormat.RGBA,
-          originRatioX: 0.0,
-          originRatioY: 0.0,
-          sizeRatioX: 1.0,
-          enableTouch: true,
-          xComponentId: 'arkzero_remote_surface'
-        };
-      });
-
       let deviceId = '';
       let password = '';
 
@@ -164,22 +153,25 @@ struct Control {
         hilog.error(DOMAIN, TAG, 'Failed to get router params: %{public}s', JSON.stringify(error));
       }
 
-      _viewModel!.initialize(deviceId, password);
+      vm.initialize(deviceId, password);
+      hilog.info(DOMAIN, TAG, 'Control page init complete');
     } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Control page init error: %{public}s', JSON.stringify(error));
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : '';
+      hilog.error(DOMAIN, TAG, 'Control page init error: %{public}s, stack: %{public}s', errMsg, errStack);
     }
   }
 
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Control page destroying');
-    if (_viewModel) {
-      _viewModel.dispose();
-      _viewModel = null;
+    if (this.viewModel) {
+      this.viewModel.dispose();
+      this.viewModel = null;
     }
-    if (_renderSession) {
-      _renderSession = null;
+    if (this.renderSession) {
+      this.renderSession.detach();
+      this.renderSession = null;
     }
-    this.renderSession = null;
   }
 
   private showToast(message: string, duration: number = 2000): void {
@@ -220,35 +212,35 @@ struct Control {
   }
 
   private handlePinchStart(): void {
-    if (_viewModel) _viewModel.handlePinchStart();
+    if (this.viewModel) this.viewModel.handlePinchStart();
   }
 
   private handlePinchUpdate(event: GestureEvent): void {
-    if (_viewModel) _viewModel.handlePinchUpdate(event.scale);
+    if (this.viewModel) this.viewModel.handlePinchUpdate(event.scale);
   }
 
   private handlePinchEnd(): void {
-    if (_viewModel) _viewModel.handlePinchEnd();
+    if (this.viewModel) this.viewModel.handlePinchEnd();
   }
 
   private handleThreeFingerPan(event: GestureEvent): void {
-    if (_viewModel) _viewModel.handleThreeFingerPan(event.offsetY);
+    if (this.viewModel) this.viewModel.handleThreeFingerPan(event.offsetY);
   }
 
   private showDragHint(): void {
-    if (_viewModel) _viewModel.showDragHint();
+    if (this.viewModel) this.viewModel.showDragHint();
   }
 
   private hideDragHint(): void {
-    if (_viewModel) _viewModel.hideDragHint();
+    if (this.viewModel) this.viewModel.hideDragHint();
   }
 
   private handleFileDrop(): void {
-    if (_viewModel) _viewModel.handleFileDrop();
+    if (this.viewModel) this.viewModel.handleFileDrop();
   }
 
   private goBackAndCloseScreen(): void {
-    if (_viewModel) _viewModel.goBackAndCloseScreen();
+    if (this.viewModel) this.viewModel.goBackAndCloseScreen();
   }
 
   @Builder
@@ -263,7 +255,7 @@ struct Control {
       .width('100%')
       .justifyContent(FlexAlign.End)
       .onClick(() => {
-        if (_viewModel) _viewModel.hidePanel();
+        if (this.viewModel) this.viewModel.hidePanel();
       })
 
       Column({ space: 12 }) {
@@ -274,7 +266,7 @@ struct Control {
           .backgroundColor('#cc3333')
           .fontColor('#fff')
           .onClick(() => {
-            if (_viewModel) _viewModel.goBackAndCloseScreen();
+            if (this.viewModel) this.viewModel.goBackAndCloseScreen();
           })
 
         Button('重置缩放')
@@ -284,7 +276,7 @@ struct Control {
           .backgroundColor('#555555')
           .fontColor('#fff')
           .onClick(() => {
-            if (_viewModel) _viewModel.resetZoom();
+            if (this.viewModel) this.viewModel.resetZoom();
           })
 
         Button('设置')
@@ -306,6 +298,7 @@ struct Control {
     .backgroundColor('rgba(0, 0, 0, 0.88)')
     .position({ x: '100%', y: 0 })
     .translate({ x: -this.panelTranslateX })
+    .zIndex(30)
   }
 
   build() {
@@ -334,8 +327,9 @@ struct Control {
           .height('100%')
           .backgroundColor('rgba(0, 0, 0, 0.3)')
           .hitTestBehavior(HitTestMode.Block)
+          .zIndex(20)
           .onClick(() => {
-            if (_viewModel) _viewModel.hidePanel();
+            if (this.viewModel) this.viewModel.hidePanel();
           })
 
         this.buildSidePanel()

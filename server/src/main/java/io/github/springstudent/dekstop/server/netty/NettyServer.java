@@ -15,6 +15,8 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+
 import java.net.InetSocketAddress;
 
 /**
@@ -50,6 +52,7 @@ public class NettyServer implements InitializingBean, DisposableBean {
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel socketChannel) throws Exception {
+                        socketChannel.pipeline().addLast(new LengthFieldBasedFrameDecoder(10485760, 3, 4, 0, 0));
                         socketChannel.pipeline().addLast(new NettyDecoder());
                         socketChannel.pipeline().addLast(new NettyEncoder());
                         socketChannel.pipeline().addLast(new NettyIdleStateHandler());

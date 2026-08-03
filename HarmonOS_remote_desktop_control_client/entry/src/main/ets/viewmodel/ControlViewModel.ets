@@ -62,6 +62,7 @@ export class ControlViewModel {
 
   private renderSession: ArkZeroRenderSession | null = null;
   private pendingTileData: TileRenderData | null = null;
+  private isRendering: boolean = false;
 
   private longPressTimer: number | null = null;
   private readonly LONG_PRESS_DURATION = 500;
@@ -107,6 +108,8 @@ export class ControlViewModel {
 
   setRenderSession(session: ArkZeroRenderSession): void {
     this.renderSession = session;
+    hilog.info(DOMAIN, TAG, 'setRenderSession: ready=%{public}s, width=%{public}d, height=%{public}d',
+      String(session.ready), session.width, session.height);
 
     if (session.ready && this.pendingTileData) {
       const pending = this.pendingTileData;
@@ -223,23 +226,102 @@ export class ControlViewModel {
     this.dependencies.remoteControlService.getPerformanceMonitor().start();
 
     const currentState = this.dependencies.remoteControlService.getConnectionState();
+    hilog.info(DOMAIN, TAG, 'Current connection state on init: %{public}s', String(currentState));
+
     if (currentState === ConnectionState.CONNECTED) {
       this.updateState({ connectionState: AppState.CONNECTED });
       if (deviceId) {
         this.openRemoteScreen();
       }
+    } else {
+      hilog.info(DOMAIN, TAG, 'Not connected, attempting to reconnect...');
+      this.dependencies.remoteControlService.connect(
+        () => {
+          hilog.info(DOMAIN, TAG, 'Reconnect succeeded');
+        },
+        (error: string) => {
+          hilog.error(DOMAIN, TAG, 'Reconnect failed: %{public}s', error);
+          this.showToast('连接失败，请返回重试', 3000);
+        }
+      );
     }
   }
 
+  private renderFrameCount: number = 0;
+
+  private mergeTileData(existing: TileRenderData, incoming: TileRenderData): TileRenderData {
+    const mergedTiles: TileRegion[] = [];
+    for (let i = 0; i < existing.tiles.length; i++) {
+      mergedTiles.push(existing.tiles[i]);
+    }
+    for (let i = 0; i < incoming.tiles.length; i++) {
+      const newTile = incoming.tiles[i];
+      let foundIdx = -1;
+      for (let j = 0; j < mergedTiles.length; j++) {
+        const t = mergedTiles[j];
+        if (t.ratioX === newTile.ratioX && t.ratioY === newTile.ratioY &&
+          t.tilePixelWidth === newTile.tilePixelWidth && t.tilePixelHeight === newTile.tilePixelHeight) {
+          foundIdx = j;
+          break;
+        }
+      }
+      if (foundIdx >= 0) {
+        mergedTiles[foundIdx] = newTile;
+      } else {
+        mergedTiles.push(newTile);
+      }
+    }
+    const result: TileRenderData = {
+      tiles: mergedTiles,
+      frameWidth: incoming.frameWidth,
+      frameHeight: incoming.frameHeight,
+      captureId: incoming.captureId,
+      isReset: incoming.isReset
+    };
+    return result;
+  }
+
   private onTileRenderData(data: TileRenderData): void {
+    this.renderFrameCount++;
+
+    if (this.renderFrameCount <= 5 || this.renderFrameCount % 60 === 0) {
+      hilog.info(DOMAIN, TAG, 'onTileRenderData #%{public}d: tiles=%{public}d, size=%{public}d x %{public}d, reset=%{public}s, session=%{public}s, ready=%{public}s, rendering=%{public}s',
+        this.renderFrameCount, data.tiles.length, data.frameWidth, data.frameHeight,
+        String(data.isReset),
+        this.renderSession ? 'exists' : 'NULL',
+        this.renderSession ? String(this.renderSession.ready) : 'N/A',
+        String(this.isRendering));
+    }
+
     if (!this.renderSession) {
-      this.pendingTileData = data;
+      if (this.pendingTileData) {
+        this.pendingTileData = this.mergeTileData(this.pendingTileData, data);
+      } else {
+        this.pendingTileData = data;
+      }
+      hilog.warn(DOMAIN, TAG, 'No renderSession, buffering tile data (merged=%{public}d tiles)', this.pendingTileData.tiles.length);
       return;
     }
 
     if (!this.renderSession.ready) {
-      this.pendingTileData = data;
-      hilog.info(DOMAIN, TAG, 'Buffering tile frame (session not ready), tiles=%{public}d', data.tiles.length);
+      if (this.pendingTileData) {
+        this.pendingTileData = this.mergeTileData(this.pendingTileData, data);
+      } else {
+        this.pendingTileData = data;
+      }
+      hilog.info(DOMAIN, TAG, 'Buffering tile frame (session not ready), merged=%{public}d tiles', this.pendingTileData.tiles.length);
+      return;
+    }
+
+    if (this.isRendering) {
+      if (this.pendingTileData) {
+        this.pendingTileData = this.mergeTileData(this.pendingTileData, data);
+      } else {
+        this.pendingTileData = data;
+      }
+      if (this.renderFrameCount <= 10) {
+        hilog.info(DOMAIN, TAG, 'Rendering in progress, buffering frame #%{public}d (merged=%{public}d tiles)', this.renderFrameCount, this.pendingTileData.tiles.length);
+      }
       return;
     }
 
@@ -250,29 +332,49 @@ export class ControlViewModel {
     const fw = data.frameWidth;
     const fh = data.frameHeight;
 
-    if (this.state.screenWidth !== fw || this.state.screenHeight !== fh) {
-      this.updateState({ screenWidth: fw, screenHeight: fh });
+    this.isRendering = true;
 
-      this.renderSession.resize(fw, fh);
+    const doRender = async () => {
+      try {
+        if (this.state.screenWidth !== fw || this.state.screenHeight !== fh) {
+          hilog.info(DOMAIN, TAG, 'Resizing renderSession: %{public}d x %{public}d -> %{public}d x %{public}d',
+            this.state.screenWidth, this.state.screenHeight, fw, fh);
+          this.updateState({ screenWidth: fw, screenHeight: fh });
+          await this.renderSession!.resize(fw, fh);
+          hilog.info(DOMAIN, TAG, 'Resize complete');
+        }
 
-      if (this.resolutionChangeCallback) {
-        this.resolutionChangeCallback(fw, fh);
+        await this.renderSession!.renderTileRegions(data.tiles, fw, fh, true);
+
+        if (!this.state.isRendererReady) {
+          this.updateState({ isRendererReady: true });
+          hilog.info(DOMAIN, TAG, 'Renderer marked ready');
+        }
+
+        if (this.renderFrameCount <= 5 || this.renderFrameCount % 60 === 0) {
+          hilog.info(DOMAIN, TAG, 'renderTileRegions OK, frame #%{public}d', this.renderFrameCount);
+        }
+      } catch (error) {
+        hilog.error(DOMAIN, TAG, 'Render error frame #%{public}d: %{public}s', this.renderFrameCount,
+          error instanceof Error ? error.message : String(error));
+        if (error instanceof Error && error.stack) {
+          hilog.error(DOMAIN, TAG, 'Render error stack: %{public}s', error.stack);
+        }
+      } finally {
+        this.isRendering = false;
+        if (this.pendingTileData) {
+          const pending = this.pendingTileData;
+          this.pendingTileData = null;
+          this.onTileRenderData(pending);
+        }
       }
-    }
+    };
 
-    try {
-      this.renderSession.renderTileRegions(data.tiles, fw, fh, true);
-
-      if (!this.state.isRendererReady) {
-        this.updateState({ isRendererReady: true });
-      }
-    } catch (error) {
-      hilog.error(DOMAIN, TAG, 'Render error: %{public}s', error instanceof Error ? error.message : String(error));
-    }
+    doRender();
   }
 
   dispose(): void {
-    hilog.info(DOMAIN, TAG, 'ControlViewModel dispose');
+    hilog.info(DOMAIN, TAG, 'ControlViewModel dispose, rendered=%{public}d frames', this.renderFrameCount);
 
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);

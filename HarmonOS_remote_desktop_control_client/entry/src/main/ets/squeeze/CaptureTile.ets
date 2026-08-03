@@ -36,12 +36,11 @@ export class CaptureTile {
 
   static fromSingleLevel(xywh: XYWH, singleLevel: number): CaptureTile {
     const data = new Uint8Array(xywh.w * xywh.h * 4);
-    // RGBA格式：R=G=B=singleLevel, A=255（不透明）
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = singleLevel;     // R
+      data[i] = singleLevel;     // B
       data[i + 1] = singleLevel; // G
-      data[i + 2] = singleLevel; // B
-      data[i + 3] = 255;         // A (必须不透明)
+      data[i + 2] = singleLevel; // R
+      data[i + 3] = 255;         // A
     }
     const capture = MemByteBuffer.fromArray(data);
     // 与Java端一致：单级瓦片的checksum为-1

@@ -131,7 +131,8 @@ export class FrameDecoder {
             const cacheId = unzipped.readInt();
             const cachedTile = this.tileCache.get(cacheId);
             if (cachedTile === CaptureTile.MISSING) {
-              dirty[tidx] = null;
+              dirty[tidx] = CaptureTile.fromSingleLevel(xywhArray[tidx], 0);
+              hilog.warn(DOMAIN, TAG, 'Cache MISS at idx=%{public}d, cacheId=%{public}d, cacheSize=%{public}d, captureId=%{public}d', tidx, cacheId, this.tileCache.size(), cId);
             } else {
               dirty[tidx] = CaptureTile.fromCache(xywhArray[tidx], cachedTile);
             }
@@ -161,6 +162,26 @@ export class FrameDecoder {
     this.tileCache.onCaptureProcessed();
 
     return capture;
+  }
+
+  getTileCacheSize(): number {
+    return this.tileCache.size();
+  }
+
+  getTileCacheHits(): number {
+    return this.tileCache.getHits();
+  }
+
+  getTileCacheMisses(): number {
+    return this.tileCache.getMisses();
+  }
+
+  getNegativeGetCount(): number {
+    return this.tileCache.getNegativeGetCount();
+  }
+
+  getNormalizedAddCount(): number {
+    return this.tileCache.getNormalizedAddCount();
   }
 
   private async zstdDecompress(zipped: MemByteBuffer): Promise<MemByteBuffer> {

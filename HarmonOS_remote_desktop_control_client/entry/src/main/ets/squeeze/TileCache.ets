@@ -9,6 +9,9 @@ export interface TileCache {
   onCaptureProcessed(): void;
   clearHits(): void;
   getHits(): number;
+  getMisses(): number;
+  getNormalizedAddCount(): number;
+  getNegativeGetCount(): number;
 }
 
 export class NullTileCache implements TileCache {
@@ -35,6 +38,18 @@ export class NullTileCache implements TileCache {
   getHits(): number {
     return 0;
   }
+
+  getMisses(): number {
+    return 0;
+  }
+
+  getNormalizedAddCount(): number {
+    return 0;
+  }
+
+  getNegativeGetCount(): number {
+    return 0;
+  }
 }
 
 interface LruEntry {
@@ -49,6 +64,9 @@ export class RegularTileCache implements TileCache {
   private head: LruEntry | null = null;
   private tail: LruEntry | null = null;
   private hits: number = 0;
+  private misses: number = 0;
+  private normalizedAddCount: number = 0;
+  private negativeGetCount: number = 0;
   private readonly maxSize: number;
   private readonly purgeSize: number;
 
@@ -60,9 +78,9 @@ export class RegularTileCache implements TileCache {
   getCacheId(tile: CaptureTile): number {
     const cs = tile.checksum;
     if (cs < 0 || cs > 4294967295) {
-      return Math.floor(cs & 0xFFFFFFFF);
+      this.normalizedAddCount++;
     }
-    return cs;
+    return cs | 0;
   }
 
   private moveToHead(entry: LruEntry): void {
@@ -106,6 +124,22 @@ export class RegularTileCache implements TileCache {
     return cacheId;
   }
 
+  private removeFromHead(): void {
+    if (this.head === null) {
+      return;
+    }
+    const cacheId = this.head.cacheId;
+    const next = this.head.next;
+    if (next !== null) {
+      next.prev = null;
+    } else {
+      this.tail = null;
+    }
+    this.head = next;
+    this.entries.delete(cacheId);
+    this.tiles.delete(cacheId);
+  }
+
   private removeFromList(entry: LruEntry): void {
     if (entry.prev !== null) {
       entry.prev.next = entry.next;
@@ -144,6 +178,9 @@ export class RegularTileCache implements TileCache {
   }
 
   get(cachedId: number): CaptureTile {
+    if (cachedId < 0) {
+      this.negativeGetCount++;
+    }
     const tile = this.tiles.get(cachedId);
     if (tile !== undefined) {
       this.hits++;
@@ -153,6 +190,7 @@ export class RegularTileCache implements TileCache {
       }
       return tile;
     }
+    this.misses++;
     return CaptureTile.MISSING;
   }
 
@@ -170,8 +208,8 @@ export class RegularTileCache implements TileCache {
 
   onCaptureProcessed(): void {
     if (this.tiles.size > 0 && this.tiles.size >= this.maxSize) {
-      while (this.tiles.size > this.purgeSize && this.tail !== null) {
-        this.removeTail();
+      while (this.tiles.size > this.purgeSize && this.head !== null) {
+        this.removeFromHead();
       }
     }
   }
@@ -182,5 +220,17 @@ export class RegularTileCache implements TileCache {
 
   getHits(): number {
     return this.hits;
+  }
+
+  getMisses(): number {
+    return this.misses;
+  }
+
+  getNormalizedAddCount(): number {
+    return this.normalizedAddCount;
+  }
+
+  getNegativeGetCount(): number {
+    return this.negativeGetCount;
   }
 }

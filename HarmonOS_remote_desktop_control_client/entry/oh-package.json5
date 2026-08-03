@@ -6,7 +6,7 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "@plusml/arkzero": "^1.2.0"
+    "@plusml/arkzero": "^2.0.1"
   }
 }
 

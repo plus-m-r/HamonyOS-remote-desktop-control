@@ -42,6 +42,11 @@ export interface IConnectionManager {
   send(data: ArrayBuffer): Promise<void>;
 
   /**
+   * 更新连接目标地址
+   */
+  updateTarget(host: string, port: number): void;
+
+  /**
    * 清理资源
    */
   cleanup(): void;

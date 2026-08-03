@@ -185,6 +185,15 @@ export class ConnectionManager implements IConnectionManager {
   }
 
   /**
+   * 更新连接目标地址
+   */
+  updateTarget(host: string, port: number): void {
+    this.host = host;
+    this.port = port;
+    hilog.info(DOMAIN, TAG, 'Target updated: %{public}s:%{public}d', host, port);
+  }
+
+  /**
    * 清理资源
    */
   cleanup(): void {

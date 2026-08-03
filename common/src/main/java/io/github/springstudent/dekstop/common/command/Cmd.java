@@ -11,10 +11,8 @@ import java.util.Arrays;
  * @date 2024/12/11 8:57
  **/
 public abstract class Cmd implements Serializable {
-    /**
-     * 魔数
-     */
-    private static final byte MAGIC_NUMBER = (byte) 100;
+    private static final byte MAGIC_BYTE_0 = (byte) 0x64;
+    private static final byte MAGIC_BYTE_1 = (byte) 0x33;
 
     public abstract CmdType getType();
 
@@ -26,7 +24,8 @@ public abstract class Cmd implements Serializable {
     public abstract void encode(ByteBuf out) throws IOException;
 
     public static void encodeMagicNumber(ByteBuf out) throws IOException {
-        out.writeByte(MAGIC_NUMBER);
+        out.writeByte(MAGIC_BYTE_0);
+        out.writeByte(MAGIC_BYTE_1);
     }
 
     public static void encodeWireSize(ByteBuf out,int wireSize)throws IOException{
@@ -34,7 +33,9 @@ public abstract class Cmd implements Serializable {
     }
 
     public static void decodeMagicNumber(ByteBuf in) throws IOException {
-        if (Cmd.MAGIC_NUMBER != in.readByte()) {
+        byte b0 = in.readByte();
+        byte b1 = in.readByte();
+        if (b0 != MAGIC_BYTE_0 || b1 != MAGIC_BYTE_1) {
             throw new IOException("Protocol error!");
         }
     }

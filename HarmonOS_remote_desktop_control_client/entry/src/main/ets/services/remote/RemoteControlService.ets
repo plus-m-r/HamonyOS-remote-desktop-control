@@ -219,17 +219,6 @@ export class RemoteControlService implements IRemoteControlService {
     
     hilog.info(DOMAIN, TAG, 'Received data: %{public}d bytes', dataSize);
 
-    // 接收侧背压：latest-wins，队列超限时丢弃最旧数据包，避免内存持续膨胀
-    while (this.dataQueue.length >= this.maxDataQueueSize) {
-      this.dataQueue.shift();
-      this.droppedDataQueueCount++;
-    }
-
-    if (this.droppedDataQueueCount > 0 && this.droppedDataQueueCount % 20 === 0) {
-      hilog.warn(DOMAIN, TAG, 'Data queue backpressure active, dropped packets: %{public}d', this.droppedDataQueueCount);
-    }
-    
-    // 将数据加入队列
     this.dataQueue.push(data);
     
     // 如果没有正在处理，开始处理队列
@@ -278,7 +267,7 @@ export class RemoteControlService implements IRemoteControlService {
     } else {
       // 没有命令，可能是残留数据或粘包情况
       // CmdCapture 命令通过 callback 处理，不会出现在 commands 数组中
-      hilog.warn(DOMAIN, TAG, 'No commands parsed, %{public}d bytes of data ignored', data.byteLength);
+      hilog.debug(DOMAIN, TAG, 'Partial data buffered, %{public}d bytes (awaiting more)', data.byteLength);
     }
   }
 
@@ -303,11 +292,10 @@ export class RemoteControlService implements IRemoteControlService {
     this.dataQueue = [];
     this.isProcessingData = false;
     
-    // ⭐ 新架构：重置PixelMap初始化标志
     this.isPixelMapInitialized = false;
     
     await this.connectionManager.disconnect();
-    this.protocolHandler.cleanup();
+    this.protocolHandler.reset();
     this.heartbeatManager.destroy();
   }
 
@@ -468,6 +456,13 @@ export class RemoteControlService implements IRemoteControlService {
     hilog.info(DOMAIN, TAG, 'Changing password');
   }
 
+  updateConnectionTarget(host: string, port: number): void {
+    hilog.info(DOMAIN, TAG, 'Updating connection target: %{public}s:%{public}d', host, port);
+    this.connectionManager.updateTarget(host, port);
+    this.config.host = host;
+    this.config.port = port;
+  }
+
   cleanup(): void {
     this.stopHeartbeat();
     this.connectionManager.cleanup();
@@ -549,11 +544,36 @@ export class RemoteControlService implements IRemoteControlService {
       this.videoConfig.enabled = true;
       this.imageAssembler.reset();
       this.captureCache.clear();
-      // TileCache 将通过 CompressorConfig 命令配置
-      hilog.info(DOMAIN, TAG, 'Waiting for CompressorConfig to set up tile cache');
+      // 禁用瓦片缓存：避免两端缓存不一致导致引用缺失（白块残留/黑块闪动）。
+      // 被控端收到 CompressorConfig 后改用 NullTileCache，始终发送完整瓦片数据。
+      this.sendCompressorCacheConfig(false);
     } else {
       hilog.error(DOMAIN, TAG, 'Remote screen capture failed: %{public}s', status);
       this.videoConfig.enabled = false;
+    }
+  }
+
+  /**
+   * 发送压缩器配置（瓦片缓存开关）到被控端
+   */
+  private async sendCompressorCacheConfig(useCache: boolean): Promise<void> {
+    if (this.getConnectionState() !== ConnectionState.CONNECTED || !this.remoteDeviceCode) {
+      return;
+    }
+    try {
+      const configCmd = CmdUtils.createCompressorConfigCmd(
+        this.remoteDeviceCode,
+        CompressionMethod.ZSTD,
+        0,
+        useCache,
+        this.compressorCacheMaxSize,
+        this.compressorCachePurgeSize
+      );
+      const encoded = CmdCodec.encode(configCmd);
+      await this.connectionManager.send(encoded);
+      hilog.info(DOMAIN, TAG, 'CompressorConfig sent - useCache=%{public}s', String(useCache));
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, 'Failed to send CompressorConfig: %{public}s', JSON.stringify(error));
     }
   }
 
@@ -824,6 +844,8 @@ export class RemoteControlService implements IRemoteControlService {
             captureId: capture.id,
             isReset: capture.reset
           };
+          hilog.info(DOMAIN, TAG, 'Invoking tileScreenCallback: tiles=%{public}d, size=%{public}d x %{public}d, reset=%{public}s, id=%{public}d',
+            tileRegions.length, capture.width, capture.height, String(capture.reset), capture.id);
           this.tileScreenCallback(tileData);
 
           const frameDelay = Date.now() - this.frameReceiveTimestamp;
@@ -838,6 +860,14 @@ export class RemoteControlService implements IRemoteControlService {
               capture.height,
               tileRegions.length,
               String(capture.reset));
+            const hits = decoder.getTileCacheHits();
+            const misses = decoder.getTileCacheMisses();
+            const totalGets = hits + misses;
+            const hitRateStr = (totalGets > 0 ? (100 * hits / totalGets) : 100).toFixed(1) + '%';
+            hilog.info(DOMAIN, TAG, 'Tile cache: size=%{public}d, hits=%{public}d, misses=%{public}d, negGets=%{public}d, normAdds=%{public}d, hitRate=%{public}s',
+              decoder.getTileCacheSize(), hits, misses,
+              decoder.getNegativeGetCount(), decoder.getNormalizedAddCount(),
+              hitRateStr);
           }
         } catch (error) {
           hilog.error(DOMAIN, TAG, 'Error in tileScreenCallback: %{public}s', error instanceof Error ? error.message : String(error));
@@ -967,6 +997,7 @@ export class RemoteControlService implements IRemoteControlService {
     try {
       const pingCmd = CmdCodec.createPingCmd();
       const encoded = CmdCodec.encode(pingCmd);
+      hilog.info(DOMAIN, TAG, 'Heartbeat encode size=%{public}d', encoded.byteLength);
       await this.connectionManager.send(encoded);
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'Failed to send heartbeat: %{public}s', JSON.stringify(error));

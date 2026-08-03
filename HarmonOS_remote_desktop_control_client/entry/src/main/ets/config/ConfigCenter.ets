@@ -39,7 +39,7 @@ export interface CaptureCacheRuntimeConfig {
  */
 const DEFAULT_CONFIG: AppConfig = {
   server: {
-    host: '10.19.91.247',
+    host: '192.168.31.6',
     tcpPort: 54321,
     httpPort: 12345,
     contextPath: '/remote-desktop-control'
@@ -122,7 +122,7 @@ interface EnvironmentConfigs {
 const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   development: {
     server: {
-      host: '10.19.91.247',
+      host: '192.168.31.6',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -137,7 +137,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   testing: {
     server: {
-      host: '10.19.91.247',
+      host: '192.168.31.6',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -161,7 +161,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   production: {
     server: {
-      host: '10.19.91.247',
+      host: '192.168.31.6',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'
@@ -176,7 +176,7 @@ const ENVIRONMENT_CONFIGS: EnvironmentConfigs = {
   },
   emulator: {
     server: {
-      host: '10.19.91.247',
+      host: '192.168.31.6',
       tcpPort: 54321,
       httpPort: 12345,
       contextPath: '/remote-desktop-control'

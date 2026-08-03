@@ -6,14 +6,6 @@ import hilog from '@ohos.hilog';
 const DOMAIN: number = 0xFF00;
 const TAG: string = 'ProtocolHandler';
 
-/**
- * 协议处理器实现
- * 职责：只负责解析命令，不处理视频流
- * 
- * 架构说明：
- * - 所有协议解析在主线程完成（无需 Worker）
- * - 使用 CmdCodec.extractCommands 进行命令提取
- */
 export class ProtocolHandler implements IProtocolHandler {
   private receiveBuffer: Uint8Array = new Uint8Array(0);
   private commandCallback: ((cmd: ConcreteCmd) => Promise<void>) | null = null;
@@ -64,6 +56,11 @@ export class ProtocolHandler implements IProtocolHandler {
 
   getBufferSize(): number {
     return this.receiveBuffer.length;
+  }
+
+  reset(): void {
+    this.receiveBuffer = new Uint8Array(0);
+    hilog.info(DOMAIN, TAG, 'ProtocolHandler reset (callback preserved)');
   }
 
   cleanup(): void {
