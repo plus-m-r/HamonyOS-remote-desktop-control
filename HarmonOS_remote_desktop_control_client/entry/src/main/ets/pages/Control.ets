@@ -115,15 +115,13 @@ struct Control {
           return;
         }
         const touch: TouchPoint = event.touches[0];
-        const x: number = touch.pixelX;
-        const y: number = touch.pixelY;
 
         if (event.type === TouchType.Down) {
-          vm.handleTouchStart(x, y);
+          vm.handleTouchStart(touch);
         } else if (event.type === TouchType.Move) {
-          vm.handleTouchMove(x, y);
+          vm.handleTouchMove(touch);
         } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-          vm.handleTouchEnd(x, y);
+          vm.handleTouchEnd(touch);
         }
       };
 

@@ -3,7 +3,7 @@ import { IFileService, UploadFile } from '../services/interfaces/IFileService';
 import { IClipboardService } from '../services/interfaces/IClipboardService';
 import { AppState } from '../state/AppStateManager';
 import { ConnectionState } from '../models/DeviceInfo';
-import { ArkZeroRenderSession, RenderSessionConfig, TileRegion, PixelFormat } from '@plusml/arkzero';
+import { ArkZeroRenderSession, RenderSessionConfig, TileRegion, PixelFormat, TouchPoint } from '@plusml/arkzero';
 import hilog from '@ohos.hilog';
 
 const TAG = 'ControlViewModel';
@@ -438,65 +438,65 @@ export class ControlViewModel {
     this.goBack();
   }
 
-  handleTouchStart(x: number, y: number): void {
+  handleTouchStart(touch: TouchPoint): void {
     this.updateState({
-      lastTouchX: x,
-      lastTouchY: y,
+      lastTouchX: touch.pixelX,
+      lastTouchY: touch.pixelY,
       isLongPress: false
     });
 
     this.longPressTimer = setTimeout(() => {
       this.updateState({ isLongPress: true });
-      this.sendMouseControl(x, y, 2);
+      this.sendMouseControl(touch, 2);
     }, this.LONG_PRESS_DURATION);
   }
 
-  handleTouchMove(x: number, y: number): void {
+  handleTouchMove(touch: TouchPoint): void {
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);
       this.longPressTimer = null;
     }
 
     this.updateState({
-      lastTouchX: x,
-      lastTouchY: y
+      lastTouchX: touch.pixelX,
+      lastTouchY: touch.pixelY
     });
   }
 
-  handleTouchEnd(x: number, y: number): void {
+  handleTouchEnd(touch: TouchPoint): void {
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);
       this.longPressTimer = null;
     }
 
     if (!this.state.isLongPress) {
-      this.sendMouseControl(x, y, 1);
+      this.sendMouseControl(touch, 1);
     }
   }
 
-  private sendMouseControl(x: number, y: number, button: number): void {
+  private sendMouseControl(touch: TouchPoint, button: number): void {
     try {
-      const remotePoint = this.mapLocalToRemoteCoordinate(x, y);
+      const remotePoint = this.mapLocalToRemoteCoordinate(touch);
       this.dependencies.remoteControlService.sendMouseControl(remotePoint.x, remotePoint.y, button, undefined);
     } catch (error) {
       hilog.error(DOMAIN, TAG, 'sendMouseControl failed: %{public}s', JSON.stringify(error));
     }
   }
 
-  private mapLocalToRemoteCoordinate(localX: number, localY: number): CoordinatePoint {
-    const remoteWidth = this.state.screenWidth > 0 ? this.state.screenWidth : Number.MAX_SAFE_INTEGER;
-    const remoteHeight = this.state.screenHeight > 0 ? this.state.screenHeight : Number.MAX_SAFE_INTEGER;
+  private mapLocalToRemoteCoordinate(touch: TouchPoint): CoordinatePoint {
+    const remoteWidth = this.state.screenWidth;
+    const remoteHeight = this.state.screenHeight;
 
-    let remoteX = Math.round(localX);
-    let remoteY = Math.round(localY);
-
-    if (remoteWidth !== Number.MAX_SAFE_INTEGER) {
-      remoteX = Math.max(0, Math.min(remoteWidth - 1, remoteX));
+    // 远端分辨率未知时退回像素坐标，避免映射到错误的区域
+    if (remoteWidth <= 0 || remoteHeight <= 0) {
+      return { x: Math.round(touch.pixelX), y: Math.round(touch.pixelY) };
     }
 
-    if (remoteHeight !== Number.MAX_SAFE_INTEGER) {
-      remoteY = Math.max(0, Math.min(remoteHeight - 1, remoteY));
-    }
+    // ratioX/ratioY 是 0~1 归一化坐标，乘以远端分辨率得到远端像素坐标
+    let remoteX = Math.round(touch.ratioX * remoteWidth);
+    let remoteY = Math.round(touch.ratioY * remoteHeight);
+    remoteX = Math.max(0, Math.min(remoteWidth - 1, remoteX));
+    remoteY = Math.max(0, Math.min(remoteHeight - 1, remoteY));
 
     return { x: remoteX, y: remoteY };
   }
