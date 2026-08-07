@@ -1,27 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
-import 'theme/app_theme.dart';
-import 'routes/app_routes.dart';
+
+import 'pages/home_page.dart';
 
 void main() {
-  runApp(const RemoteDesktopApp());
+  runApp(const RemoteControlApp());
 }
 
-class RemoteDesktopApp extends StatelessWidget {
-  const RemoteDesktopApp({Key? key}) : super(key: key);
+class RemoteControlApp extends StatelessWidget {
+  const RemoteControlApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return GetMaterialApp(
-      title: 'HarmonyOS 远程桌面控制',
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      initialRoute: AppRoutes.login,
-      getPages: AppRoutes.pages,
-      defaultTransition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 300),
+    return MaterialApp(
+      title: '远程桌面控制',
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1E5EFF),
+        ),
+        scaffoldBackgroundColor: Colors.white,
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
     );
   }
 }
