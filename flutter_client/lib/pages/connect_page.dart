@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../protocol/cmd_codec.dart';
@@ -33,7 +33,10 @@ class _ConnectPageState extends State<ConnectPage> {
   String _deviceCode = ''; // 服务器返回的本机设备码
   String _linkPassword = ''; // 服务器返回的本机密码
   Socket? _socket;
-
+  Timer? _heartbeatTimer;
+  Timer? _reconnectTimer;
+  DateTime? _lastrepongtime; // 上次收到心跳的时间，用于判断连接是否断开
+  bool _waitingDeviceResp = false; // 正在等待"连接设备"的 resCapture 响应
   @override
   void dispose() {
     _ipController.dispose();
@@ -41,6 +44,8 @@ class _ConnectPageState extends State<ConnectPage> {
     _deviceCodeController.dispose();
     _linkPasswordController.dispose();
     _socket?.destroy();
+    _heartbeatTimer?.cancel();
+    _reconnectTimer?.cancel();
     super.dispose();
   }
 
@@ -60,32 +65,64 @@ class _ConnectPageState extends State<ConnectPage> {
       final socket =
           await Socket.connect(ip, port, timeout: const Duration(seconds: 5));
       _socket = socket;
+      _lastrepongtime = DateTime.now(); // 连上即视为活着
 
-      // 1. 服务器连上会自动下发 resCliInfo（NettyServerHandler.channelActive）
-      final (type, body) = await _readFrame(socket);
-      if (type != CmdType.resCliInfo) {
-        throw Exception('服务器返回了意外命令: ${type.name}');
-      }
-      final (deviceCode, password) = CmdCodec.parseResCliInfoBody(body);
+      // 统一用 socket.listen 持续监听（socket 流只能被监听一次！）
+      _startReadLoop(socket);
 
-      // 2. 收到设备码密码后，再上报本机信息（屏幕数 + 系统名）
+      // 2. 上报本机信息（屏幕数 + 系统名），服务器随后下发 resCliInfo
       final reqBody = CmdCodec.buildReqCliInfoBody(1, 'Windows');
       socket.add(CmdCodec.encode(CmdType.reqCliInfo, reqBody));
 
+      // 3. 启动心跳定时器，每 5 秒发一次 reqPing
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        final lasttime = _lastrepongtime;
+        if (lasttime != null &&
+            DateTime.now().difference(lasttime) > const Duration(seconds: 15)) {
+          _handleDisconnect(); // 超 15 秒无数据 → 判死重连
+          return;
+        }
+        try {
+          socket.add(CmdCodec.encode(CmdType.reqPing, Uint8List(0)));
+        } catch (e) {
+          _handleDisconnect();
+        }
+      });
+      _reconnectTimer?.cancel(); // 连上了，取消待触发的重连
       if (!mounted) return;
       setState(() {
         _connectingServer = false;
-        _deviceCode = deviceCode; // 填进"本机设置"区
-        _linkPassword = password;
-        _serverStatus = '连接成功，已获取本机设备信息';
+        _serverStatus = '连接成功，等待设备信息…';
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _connectingServer = false;
-        _serverStatus = '连接失败：$e';
+        _serverStatus = '连接失败：$e,5秒后尝试重连…';
       });
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() {
+        _serverStatus = '尝试重连…';
+      });
+      _connectServer();
+    });
+  }
+  void _handleDisconnect(){
+    if (!mounted) return;
+    _heartbeatTimer?.cancel();
+    setState(() {
+      _connectingServer = false;
+      _serverStatus = '与服务器断开连接，5秒后尝试重连…';
+    });
+    _scheduleReconnect();
   }
 
   /// 连接设备：向服务器发送 reqCapture（设备码+密码），请求开始控制目标设备。
@@ -109,43 +146,70 @@ class _ConnectPageState extends State<ConnectPage> {
       // 0 = 开始截屏（建立控制会话）
       final body = CmdCodec.buildReqCaptureBody(deviceCode, 0, password);
       socket.add(CmdCodec.encode(CmdType.reqCapture, body));
-
-      // 等待服务器返回 resCapture 确认
-      final (type, respBody) = await _readFrame(socket);
-      if (type != CmdType.resCapture) {
-        throw Exception('服务器返回了意外命令: ${type.name}');
-      }
-      final code = respBody.isEmpty ? -1 : respBody[0]; // resCapture 第 1 字节是状态码
-      if (!mounted) return;
+      // 响应由 _startReadLoop 的监听收到（_onFrame 处理 resCapture），这里只等
+      _waitingDeviceResp = true;
       setState(() {
-        _connectingDevice = false;
-        _deviceStatus = '设备连接成功（状态码 $code）';
+        _deviceStatus = '已发送连接请求，等待服务器确认…';
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _connectingDevice = false;
-        _deviceStatus = '连接失败：$e';
+        _deviceStatus = '发送失败：$e';
       });
     }
   }
 
-  /// 从 socket 读取完整一帧（7 字节头 + body）。
-  Future<(CmdType, Uint8List)> _readFrame(Socket socket) async {
-    final builder = BytesBuilder();
-    // 先收齐 7 字节帧头
-    while (builder.length < CmdCodec.headerLength) {
-      final chunk = await socket.first;
-      builder.add(chunk);
+  /// 唯一的数据监听：收字节 → 攒缓冲 → 解析出完整帧 → 分发。
+  /// 注意：socket 是单订阅流，全连接生命周期只能 listen 这一次。
+  void _startReadLoop(Socket socket) {
+    var builder = BytesBuilder();
+    socket.listen(
+      (chunk) {
+        builder.add(chunk);
+        // 循环解析缓冲里的完整帧（可能一次收多帧）
+        while (true) {
+          final bytes = builder.toBytes();
+          if (bytes.length < CmdCodec.headerLength) break; // 帧头都没齐
+          final length = ByteData.sublistView(bytes).getUint32(3);
+          final frameLength = CmdCodec.headerLength + length;
+          if (bytes.length < frameLength) break; // body 没齐，等更多数据
+          // 取出一帧并移除已消费部分
+          final frame = bytes.sublist(0, frameLength);
+          final rest = bytes.sublist(frameLength);
+          builder = BytesBuilder()..add(rest);
+          _onFrame(frame);
+        }
+      },
+      onDone: () => _handleDisconnect(), // 流结束 = 服务器关闭连接
+      onError: (_) => _handleDisconnect(), // 读错误 = 断开
+    );
+  }
+
+  /// 收到一帧完整数据后的处理。
+  void _onFrame(Uint8List frame) {
+    _lastrepongtime = DateTime.now(); // 收到任何帧 = 连接活着
+    final (type, body) = CmdCodec.decode(frame);
+    if (type == CmdType.resCliInfo) {
+      // 握手帧：服务器下发本机设备码+密码
+      final (deviceCode, password) = CmdCodec.parseResCliInfoBody(body);
+      if (!mounted) return;
+      setState(() {
+        _deviceCode = deviceCode; // 填进"本机设置"区
+        _linkPassword = password;
+        _serverStatus = '连接成功，已获取本机设备信息';
+      });
+    } else if (type == CmdType.resCapture && _waitingDeviceResp) {
+      // 连接设备响应：第 1 字节是状态码
+      final code = body.isEmpty ? -1 : body[0];
+      _waitingDeviceResp = false;
+      if (!mounted) return;
+      setState(() {
+        _connectingDevice = false;
+        _deviceStatus = '设备连接成功（状态码 $code）';
+      });
     }
-    final header = builder.toBytes();
-    final length = ByteData.sublistView(header).getUint32(3);
-    // 再收齐 body
-    while (builder.length < CmdCodec.headerLength + length) {
-      final chunk = await socket.first;
-      builder.add(chunk);
-    }
-    return CmdCodec.decode(builder.toBytes());
+    // TODO(M3): 其他命令在这里分发（capture/keyControl 等）
   }
 
   @override

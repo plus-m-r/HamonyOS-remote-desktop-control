@@ -11,6 +11,8 @@ void main() {
     expect(find.text('连接'), findsWidgets);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('工具'), findsOneWidget);
-    expect(find.text('连接远程设备'), findsOneWidget);
+    expect(find.text('连接服务端'), findsWidgets); // 卡片标题 + 连接按钮，出现多次
+    expect(find.text('连接设备'), findsWidgets); // 同上
+    expect(find.text('本机设置'), findsOneWidget);
   });
 }
