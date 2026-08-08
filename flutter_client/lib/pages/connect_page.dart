@@ -3,6 +3,10 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../capture/tile_splitter.dart';
+import '../platform/windows_capturer.dart';
+import '../platform/windows_injector.dart';
+import '../protocol/cmd_capture_codec.dart';
 import '../protocol/cmd_codec.dart';
 import '../protocol/cmd_type.dart';
 
@@ -37,6 +41,11 @@ class _ConnectPageState extends State<ConnectPage> {
   Timer? _reconnectTimer;
   DateTime? _lastrepongtime; // 上次收到心跳的时间，用于判断连接是否断开
   bool _waitingDeviceResp = false; // 正在等待"连接设备"的 resCapture 响应
+  Timer? _captureTimer; // 抓屏定时器（30ms 一帧）
+  WindowsCapturer? _capturer; // 屏幕捕获器（延迟创建：首次抓屏时才建）
+  final _tileSplitter = TileSplitter(); // 瓦片切分器
+  final _injector = WindowsInjector(); // 输入注入器（SendInput）
+  int _captureId = 0; // 帧序号
   @override
   void dispose() {
     _ipController.dispose();
@@ -46,6 +55,7 @@ class _ConnectPageState extends State<ConnectPage> {
     _socket?.destroy();
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    _captureTimer?.cancel();
     super.dispose();
   }
 
@@ -199,17 +209,128 @@ class _ConnectPageState extends State<ConnectPage> {
         _linkPassword = password;
         _serverStatus = '连接成功，已获取本机设备信息';
       });
-    } else if (type == CmdType.resCapture && _waitingDeviceResp) {
-      // 连接设备响应：第 1 字节是状态码
+    } else if (type == CmdType.resCapture) {
+      // 服务器转发的被控端截屏指令：0x10=开始 0x11=停止（CmdResCapture.START_/STOP_）
       final code = body.isEmpty ? -1 : body[0];
-      _waitingDeviceResp = false;
-      if (!mounted) return;
-      setState(() {
-        _connectingDevice = false;
-        _deviceStatus = '设备连接成功（状态码 $code）';
-      });
+      if (code == 0x10) {
+        _startCaptureLoop(); // 开始持续抓屏
+        if (!mounted) return;
+        setState(() => _deviceStatus = '正在被远程控制中…');
+      } else if (code == 0x11) {
+        _stopCaptureLoop(); // 停止抓屏
+        if (!mounted) return;
+        setState(() => _deviceStatus = '远程控制已结束');
+      } else if (_waitingDeviceResp) {
+        // 控制端发起的连接设备响应（设备码+密码校验结果）
+        _waitingDeviceResp = false;
+        if (!mounted) return;
+        setState(() => _deviceStatus = '设备连接成功（状态码 $code）');
+      }
+    } else if (type == CmdType.mouseControl) {
+      _handleMouseControl(body); // 鸿蒙端鼠标命令 → 本机注入
+    } else if (type == CmdType.keyControl) {
+      _handleKeyControl(body); // 鸿蒙端键盘命令 → 本机注入
     }
-    // TODO(M3): 其他命令在这里分发（capture/keyControl 等）
+  }
+
+  /// 解析并执行鼠标命令（CmdMouseControl）。
+  /// info 位：PRESSED=1 RELEASED=2 BUTTON1=4 BUTTON2=8 BUTTON3=16 WHEEL=32
+  void _handleMouseControl(Uint8List body) {
+    final data = ByteData.sublistView(body);
+    if (body.length < 8) return; // x(2)+y(2)+info(4) 至少 8 字节
+    final x = data.getInt16(0); // 屏幕坐标
+    final y = data.getInt16(2);
+    final info = data.getUint32(4);
+    var rotations = 0;
+    if ((info & 32) != 0 && body.length >= 12) {
+      rotations = data.getInt32(8); // WHEEL 才有 rotations
+    }
+
+    // 先移动鼠标到目标位置（Java：move 之后才 press/release）
+    _injector.moveMouse(x, y);
+
+    if ((info & 1) != 0) {
+      // PRESSED
+      if ((info & 4) != 0) _injector.mouseDown(1); // BUTTON1=左
+      if ((info & 8) != 0) _injector.mouseDown(2); // BUTTON2=中
+      if ((info & 16) != 0) _injector.mouseDown(3); // BUTTON3=右
+    } else if ((info & 2) != 0) {
+      // RELEASED
+      if ((info & 4) != 0) _injector.mouseUp(1);
+      if ((info & 8) != 0) _injector.mouseUp(2);
+      if ((info & 16) != 0) _injector.mouseUp(3);
+    } else if ((info & 32) != 0) {
+      _injector.mouseWheel(rotations); // 滚轮
+    }
+  }
+
+  /// 解析并执行键盘命令（CmdKeyControl）。
+  /// info 位：PRESSED=1 RELEASED=2
+  void _handleKeyControl(Uint8List body) {
+    final data = ByteData.sublistView(body);
+    if (body.length < 8) return; // info(4)+keyCode(4) 至少 8 字节
+    final info = data.getUint32(0);
+    final keyCode = data.getInt32(4);
+
+    if ((info & 1) != 0) {
+      _injector.keyDown(keyCode); // PRESSED
+    } else if ((info & 2) != 0) {
+      _injector.keyUp(keyCode); // RELEASED
+    }
+  }
+
+  /// 启动抓屏循环：每 30ms 抓一帧 → 切瓦片 → 编码 → 发送。
+  void _startCaptureLoop() {
+    _captureTimer?.cancel();
+    _captureTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {
+      _sendCaptureFrame();
+    });
+  }
+
+  /// 停止抓屏循环。
+  void _stopCaptureLoop() {
+    _captureTimer?.cancel();
+    _captureTimer = null;
+  }
+
+  /// 抓一帧屏幕并发送 CmdCapture。
+  Future<void> _sendCaptureFrame() async {
+    final socket = _socket;
+    if (socket == null) return;
+    try {
+      // 延迟创建抓屏器（首次抓屏时才建，避免启动时初始化崩溃）
+      final capturer = _capturer ??= WindowsCapturer();
+      final pixels = await capturer.capture(); // 1. 抓屏（BGRA）
+      final grid = _tileSplitter.computeDirtyTiles(
+          pixels, capturer.width, capturer.height); // 2. 切瓦片找变化（完整网格，null=没变）
+      if (grid.isEmpty) return; // 没变化不发送（省带宽）
+
+      _captureId++;
+      // 3. 编码成 CmdCapture body（网格转 DirtyTileData，null 保持 null）
+      final body = CmdCaptureCodec.buildCaptureFrame(
+        id: _captureId,
+        reset: _captureId == 1, // 首帧 reset=1，鸿蒙端清缓存重建
+        width: capturer.width,
+        height: capturer.height,
+        tileWidth: TileSplitter.tileSize,
+        tileHeight: TileSplitter.tileSize,
+        tiles: grid
+            .map((t) => t == null
+                ? null
+                : DirtyTileData(
+                    x: t.x,
+                    y: t.y,
+                    width: t.width,
+                    height: t.height,
+                    pixelData: t.pixelData,
+                  ))
+            .toList(),
+      );
+      // 4. 外包 CmdCodec 帧头并发送
+      socket.add(CmdCodec.encode(CmdType.capture, body));
+    } catch (e) {
+      debugPrint('抓屏发送失败: $e');
+    }
   }
 
   @override

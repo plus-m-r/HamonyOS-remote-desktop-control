@@ -80,7 +80,9 @@ class WindowsCapturer implements ScreenCapturer {
         if (lines == 0) {
           throw Exception('GetDIBits 失败');
         }
-        return pixels.asTypedList(pixelSize); // 拷贝成 Uint8List（BGRA）
+        // 必须拷贝！asTypedList 返回视图（指向原生内存），
+        // calloc.free 后变悬垂指针；sublist(0) 才真正复制成独立 Uint8List
+        return pixels.asTypedList(pixelSize).sublist(0); // BGRA 像素
       } finally {
         calloc.free(pixels);
       }
