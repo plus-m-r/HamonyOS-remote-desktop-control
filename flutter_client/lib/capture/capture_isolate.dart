@@ -68,6 +68,8 @@ class CaptureIsolate {
 
   /// 关闭后台 isolate（页面销毁时调用）。
   void dispose() {
+    // 先发退出信号，让后台释放 GDI 对象（优雅），再 kill 兜底
+    _workerPort?.send(const _ShutdownRequest());
     _isolate?.kill(priority: Isolate.immediate);
     _resultPort.close();
     for (final c in _pending.values) {
@@ -96,6 +98,11 @@ class _FrameRequest {
   _FrameRequest({required this.id, required this.reset});
 }
 
+/// 主 → 后台的退出信号（后台收到后释放 FFI 对象）。
+class _ShutdownRequest {
+  const _ShutdownRequest();
+}
+
 /// 后台 → 主 的抓帧结果（body 为编码后 CmdCapture body；null=没变化）。
 class _FrameResult {
   final int id;
@@ -116,6 +123,12 @@ void _entryPoint(_InitialMessage msg) {
 
   // 循环等请求，单线程顺序处理（async 回调：capture 是异步的）
   workerPort.listen((req) async {
+    if (req is _ShutdownRequest) {
+      // 收到退出信号：释放 GDI 对象，结束后台 isolate
+      capturer.dispose();
+      workerPort.close();
+      return;
+    }
     if (req is! _FrameRequest) return;
     try {
       final pixels = await capturer.capture(); // 抓屏（BGRA）

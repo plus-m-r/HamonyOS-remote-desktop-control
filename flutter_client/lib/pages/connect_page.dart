@@ -282,7 +282,10 @@ class _ConnectPageState extends State<ConnectPage> {
   void _startCaptureLoop() {
     // 启动长驻抓屏 isolate（先取屏幕尺寸）
     final probe = WindowsCapturer();
-    _captureIsolate.start(probe.width, probe.height);
+    final w = probe.width;
+    final h = probe.height;
+    probe.dispose(); // 临时探测用，用完释放 GDI 对象
+    _captureIsolate.start(w, h);
     _captureTimer?.cancel();
     _captureTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {
       _sendCaptureFrame();

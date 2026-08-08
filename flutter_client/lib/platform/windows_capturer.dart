@@ -8,19 +8,43 @@ import 'screen_capturer.dart';
 
 /// Windows 抓屏：用 GDI 的 BitBlt 把屏幕像素复制到内存，再读出 BGRA 字节。
 /// 对应 Java 端 RobotCaptureFactory + ScreenUtilities.captureColors()。
+///
+/// 性能优化：屏幕 DC/内存 DC/位图/像素缓冲在【构造时创建一次】并复用，
+/// capture() 每帧只做 BitBlt（复制像素）+ GetDIBits（读像素）——
+/// 避免每帧创建/销毁 GDI 对象（30ms/帧 = 每秒 33 次），抓屏耗时显著下降。
 class WindowsCapturer implements ScreenCapturer {
-  int _width = 0;
-  int _height = 0;
+  late final int _width;
+  late final int _height;
+
+  // 复用的 GDI 对象（构造创建，dispose 释放）
+  late final HDC _screenDc; // 屏幕 DC
+  late final HDC _memDc; // 内存 DC
+  late final HBITMAP _bitmap; // 内存位图（与屏幕同尺寸）
+  late final Pointer<BITMAPINFO> _bmi; // 位图信息（GetDIBits 用）
+  late final Pointer<Uint8> _pixelBuffer; // 像素缓冲（宽×高×4，复用）
 
   WindowsCapturer() {
-    // 初始化：拿主屏幕尺寸（GetDC(null) 拿屏幕 DC，null = 主屏幕）
-    final dc = GetDC(null);
-    try {
-      _width = GetDeviceCaps(dc, HORZRES); // 屏幕宽（像素）
-      _height = GetDeviceCaps(dc, VERTRES); // 屏幕高（像素）
-    } finally {
-      ReleaseDC(null, dc); // 用完释放 DC
-    }
+    // 初始化：拿主屏幕尺寸
+    final probe = GetDC(null);
+    _width = GetDeviceCaps(probe, HORZRES);
+    _height = GetDeviceCaps(probe, VERTRES);
+    ReleaseDC(null, probe);
+
+    // 创建复用的 GDI 对象（一次）
+    _screenDc = GetDC(null);
+    _memDc = CreateCompatibleDC(_screenDc);
+    _bitmap = CreateCompatibleBitmap(_screenDc, _width, _height);
+    SelectObject(_memDc, HGDIOBJ(_bitmap));
+
+    // 准备位图信息 + 像素缓冲
+    _bmi = calloc<BITMAPINFO>();
+    _bmi.ref.bmiHeader.biSize = sizeOf<BITMAPINFOHEADER>();
+    _bmi.ref.bmiHeader.biWidth = _width;
+    _bmi.ref.bmiHeader.biHeight = -_height; // 负值 = 从上往下读
+    _bmi.ref.bmiHeader.biPlanes = 1;
+    _bmi.ref.bmiHeader.biBitCount = 32; // BGRA
+    _bmi.ref.bmiHeader.biCompression = BI_RGB;
+    _pixelBuffer = calloc<Uint8>(_width * _height * 4);
   }
 
   @override
@@ -31,63 +55,32 @@ class WindowsCapturer implements ScreenCapturer {
 
   @override
   Future<Uint8List> capture() async {
-    // 屏幕 DC（画布）+ 内存 DC（临时画布）
-    final screenDc = GetDC(null);
-    final memDc = CreateCompatibleDC(screenDc);
-    try {
-      // 建一块和屏幕一样大的内存位图（临时存像素）
-      final bitmap = CreateCompatibleBitmap(screenDc, _width, _height);
-      try {
-        // 把位图"挂"到内存 DC 上（HBITMAP → HGDIOBJ 包装转换）
-        SelectObject(memDc, HGDIOBJ(bitmap));
-
-        // BitBlt：把屏幕这块区域复制到内存位图（SRCCOPY = 直接复制）
-        final result = BitBlt(memDc, 0, 0, _width, _height, screenDc, 0, 0, SRCCOPY);
-        if (!result.value) {
-          throw Exception('BitBlt 失败，错误码: ${result.error}');
-        }
-
-        return _readPixels(memDc, bitmap);
-      } finally {
-        bitmap.close(); // 删位图（内部转 HGDIOBJ 调 DeleteObject）
-      }
-    } finally {
-      DeleteDC(memDc); // 删内存 DC
-      ReleaseDC(null, screenDc); // 释放屏幕 DC
+    // BitBlt：屏幕 → 内存位图（复用的对象，每帧只做这一次拷贝）
+    final result =
+        BitBlt(_memDc, 0, 0, _width, _height, _screenDc, 0, 0, SRCCOPY);
+    if (!result.value) {
+      throw Exception('BitBlt 失败，错误码: ${result.error}');
     }
+
+    // GetDIBits：位图 → 像素缓冲（复用，不每帧分配）
+    final lines =
+        GetDIBits(_memDc, _bitmap, 0, _height, _pixelBuffer, _bmi, DIB_RGB_COLORS);
+    if (lines == 0) {
+      throw Exception('GetDIBits 失败');
+    }
+
+    // 必须拷贝：asTypedList 返回视图（指向原生内存），
+    // 复用缓冲下次会被覆盖；sublist(0) 复制成独立 Uint8List
+    final pixelSize = _width * _height * 4;
+    return _pixelBuffer.asTypedList(pixelSize).sublist(0);
   }
 
-  /// 用 GetDIBits 把位图读成 BGRA 字节数组。
-  Uint8List _readPixels(HDC memDc, HBITMAP bitmap) {
-    // BITMAPINFO：描述位图格式的结构体，GetDIBits 需要它
-    final bmi = calloc<BITMAPINFO>();
-    try {
-      // 填头信息：宽/高/每像素 32 位(BGRA)/BI_RGB 未压缩
-      bmi.ref.bmiHeader.biSize = sizeOf<BITMAPINFOHEADER>();
-      bmi.ref.bmiHeader.biWidth = _width;
-      bmi.ref.bmiHeader.biHeight = -_height; // 负值 = 从上往下读（顺序正常）
-      bmi.ref.bmiHeader.biPlanes = 1;
-      bmi.ref.bmiHeader.biBitCount = 32; // 32 位 = 每像素 4 字节
-      bmi.ref.bmiHeader.biCompression = BI_RGB; // 未压缩
-
-      // 分配像素缓冲（宽 × 高 × 4 字节）
-      final pixelSize = _width * _height * 4;
-      final pixels = calloc<Uint8>(pixelSize);
-      try {
-        // 读像素到缓冲
-        final lines =
-            GetDIBits(memDc, bitmap, 0, _height, pixels, bmi, DIB_RGB_COLORS);
-        if (lines == 0) {
-          throw Exception('GetDIBits 失败');
-        }
-        // 必须拷贝！asTypedList 返回视图（指向原生内存），
-        // calloc.free 后变悬垂指针；sublist(0) 才真正复制成独立 Uint8List
-        return pixels.asTypedList(pixelSize).sublist(0); // BGRA 像素
-      } finally {
-        calloc.free(pixels);
-      }
-    } finally {
-      calloc.free(bmi);
-    }
+  /// 释放复用的 GDI 对象（页面销毁时调用）。
+  void dispose() {
+    calloc.free(_pixelBuffer);
+    calloc.free(_bmi);
+    DeleteObject(HGDIOBJ(_bitmap)); // HBITMAP → HGDIOBJ 转换
+    DeleteDC(_memDc);
+    ReleaseDC(null, _screenDc);
   }
 }
