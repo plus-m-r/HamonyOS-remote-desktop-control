@@ -3,10 +3,9 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import '../capture/tile_splitter.dart';
+import '../capture/capture_isolate.dart';
 import '../platform/windows_capturer.dart';
 import '../platform/windows_injector.dart';
-import '../protocol/cmd_capture_codec.dart';
 import '../protocol/cmd_codec.dart';
 import '../protocol/cmd_type.dart';
 
@@ -42,8 +41,7 @@ class _ConnectPageState extends State<ConnectPage> {
   DateTime? _lastrepongtime; // 上次收到心跳的时间，用于判断连接是否断开
   bool _waitingDeviceResp = false; // 正在等待"连接设备"的 resCapture 响应
   Timer? _captureTimer; // 抓屏定时器（30ms 一帧）
-  WindowsCapturer? _capturer; // 屏幕捕获器（延迟创建：首次抓屏时才建）
-  final _tileSplitter = TileSplitter(); // 瓦片切分器
+  final _captureIsolate = CaptureIsolate(); // 长驻抓屏 isolate（UI 不卡）
   final _injector = WindowsInjector(); // 输入注入器（SendInput）
   int _captureId = 0; // 帧序号
   @override
@@ -56,6 +54,7 @@ class _ConnectPageState extends State<ConnectPage> {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
     _captureTimer?.cancel();
+    _captureIsolate.dispose(); // 关后台抓屏 isolate
     super.dispose();
   }
 
@@ -279,8 +278,11 @@ class _ConnectPageState extends State<ConnectPage> {
     }
   }
 
-  /// 启动抓屏循环：每 30ms 抓一帧 → 切瓦片 → 编码 → 发送。
+  /// 启动抓屏循环：每 30ms 请求后台 isolate 抓一帧 → 发送。
   void _startCaptureLoop() {
+    // 启动长驻抓屏 isolate（先取屏幕尺寸）
+    final probe = WindowsCapturer();
+    _captureIsolate.start(probe.width, probe.height);
     _captureTimer?.cancel();
     _captureTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {
       _sendCaptureFrame();
@@ -293,40 +295,16 @@ class _ConnectPageState extends State<ConnectPage> {
     _captureTimer = null;
   }
 
-  /// 抓一帧屏幕并发送 CmdCapture。
+  /// 请求后台 isolate 抓一帧并发送 CmdCapture（UI 不阻塞）。
   Future<void> _sendCaptureFrame() async {
     final socket = _socket;
     if (socket == null) return;
     try {
-      // 延迟创建抓屏器（首次抓屏时才建，避免启动时初始化崩溃）
-      final capturer = _capturer ??= WindowsCapturer();
-      final pixels = await capturer.capture(); // 1. 抓屏（BGRA）
-      final grid = _tileSplitter.computeDirtyTiles(
-          pixels, capturer.width, capturer.height); // 2. 切瓦片找变化（完整网格，null=没变）
-      if (grid.isEmpty) return; // 没变化不发送（省带宽）
-
       _captureId++;
-      // 3. 编码成 CmdCapture body（网格转 DirtyTileData，null 保持 null）
-      final body = CmdCaptureCodec.buildCaptureFrame(
-        id: _captureId,
-        reset: _captureId == 1, // 首帧 reset=1，鸿蒙端清缓存重建
-        width: capturer.width,
-        height: capturer.height,
-        tileWidth: TileSplitter.tileSize,
-        tileHeight: TileSplitter.tileSize,
-        tiles: grid
-            .map((t) => t == null
-                ? null
-                : DirtyTileData(
-                    x: t.x,
-                    y: t.y,
-                    width: t.width,
-                    height: t.height,
-                    pixelData: t.pixelData,
-                  ))
-            .toList(),
-      );
-      // 4. 外包 CmdCodec 帧头并发送
+      // 抓屏/切瓦片/编码全在后台 isolate（FFI 对象长驻，状态保留）
+      final body = await _captureIsolate.captureFrame(reset: _captureId == 1);
+      if (body == null) return; // 没变化
+      // 外包 CmdCodec 帧头并发送
       socket.add(CmdCodec.encode(CmdType.capture, body));
     } catch (e) {
       debugPrint('抓屏发送失败: $e');
