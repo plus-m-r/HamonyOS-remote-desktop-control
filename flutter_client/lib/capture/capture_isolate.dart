@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../platform/windows_capturer.dart';
+import '../platform/platform_factory.dart';
 import '../protocol/cmd_capture_codec.dart';
 import 'tile_splitter.dart';
 
@@ -19,12 +19,18 @@ import 'tile_splitter.dart';
 ///   captureFrame(): 建 Completer 注册到 _pending，发请求，等 future
 ///   积压控制：后台单线程顺序处理；主侧每帧一个 completer（实时优先）。
 class CaptureIsolate {
+  // 积压上限：worker 未完成请求超过该数时跳过新帧，避免慢环境下无限积压拖垮心跳
+  static const int _maxPending = 3;
   Isolate? _isolate;
   SendPort? _workerPort; // 发请求给后台
   final _resultPort = ReceivePort(); // 收后台结果（只订阅一次）
   final Map<int, Completer<Uint8List?>> _pending = {}; // 按帧号配对的挂起请求
+  int _pendingCount = 0; // 未完成请求数（含已发送尚未回传）
   int _captureId = 0;
   bool _started = false;
+
+  /// 后台是否已积压（未完成请求达到上限）：是则调用方应跳过本帧。
+  bool get hasBacklog => _pendingCount >= _maxPending;
 
   /// 启动后台 isolate（建一次 FFI 对象）。
   Future<void> start(int width, int height) async {
@@ -49,19 +55,22 @@ class CaptureIsolate {
     if (msg is SendPort) {
       _workerPort = msg; // 握手：拿到发请求的端口
     } else if (msg is _FrameResult) {
+      _pendingCount = _pendingCount > 0 ? _pendingCount - 1 : 0; // 一帧完成，积压减一
       final completer = _pending.remove(msg.id);
       completer?.complete(msg.body);
     }
   }
 
   /// 请求抓一帧，返回编码后的 CmdCapture body（null = 没变化无需发送）。
+  /// 积压达到上限时直接返回 null（调用方跳过该帧，下帧自动补）。
   Future<Uint8List?> captureFrame({required bool reset}) async {
     final workerPort = _workerPort;
-    if (workerPort == null) return null;
+    if (workerPort == null || hasBacklog) return null;
     _captureId++;
     final id = _captureId;
     final completer = Completer<Uint8List?>();
     _pending[id] = completer;
+    _pendingCount++;
     workerPort.send(_FrameRequest(id: id, reset: reset));
     return completer.future;
   }
@@ -76,6 +85,7 @@ class CaptureIsolate {
       c.complete(null); // 让挂起的请求结束
     }
     _pending.clear();
+    _pendingCount = 0;
     _isolate = null;
     _workerPort = null;
     _started = false;
@@ -112,8 +122,8 @@ class _FrameResult {
 
 /// 后台 isolate 入口（顶层函数，不能闭包捕获 FFI 对象）。
 void _entryPoint(_InitialMessage msg) {
-  // 建一次 FFI 对象 —— 长驻 vs Isolate.run 的本质区别
-  final capturer = WindowsCapturer();
+  // 建一次平台抓屏器（长驻 vs Isolate.run 的本质区别）
+  final capturer = PlatformFactory.createCapturer();
   final splitter = TileSplitter();
   final mainPort = msg.mainPort; // 主 isolate 收结果端口
   final workerPort = ReceivePort(); // 后台收请求的端口

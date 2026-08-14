@@ -65,6 +65,10 @@ class WindowsInjector implements InputInjector {
     _sendKey(keyCode, KEYEVENTF_KEYUP); // 释放：KEYUP(2)
   }
 
+  /// SendInput 无需持有型资源，dispose 只保留接口一致性。
+  @override
+  void dispose() {}
+
   /// 发一个鼠标事件（SendInput，type=INPUT_MOUSE）。
   void _sendMouse(int x, int y, int flags, int mouseData) {
     final input = calloc<INPUT>();

@@ -445,9 +445,11 @@ export class ControlViewModel {
       isLongPress: false
     });
 
+    // 触摸开始 → 发送 PRESSED（按下），与 Java 端 Robot.mousePress 语义一致
+    this.sendMouseControl(touch, 1);
+
     this.longPressTimer = setTimeout(() => {
       this.updateState({ isLongPress: true });
-      this.sendMouseControl(touch, 2);
     }, this.LONG_PRESS_DURATION);
   }
 
@@ -469,9 +471,8 @@ export class ControlViewModel {
       this.longPressTimer = null;
     }
 
-    if (!this.state.isLongPress) {
-      this.sendMouseControl(touch, 1);
-    }
+    // 触摸结束 → 发送 RELEASED（抬起），完成按下-抬起配对
+    this.sendMouseControl(touch, 2);
   }
 
   private sendMouseControl(touch: TouchPoint, button: number): void {

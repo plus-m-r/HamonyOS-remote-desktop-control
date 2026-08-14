@@ -76,6 +76,7 @@ class WindowsCapturer implements ScreenCapturer {
   }
 
   /// 释放复用的 GDI 对象（页面销毁时调用）。
+  @override
   void dispose() {
     calloc.free(_pixelBuffer);
     calloc.free(_bmi);

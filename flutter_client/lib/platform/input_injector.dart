@@ -18,4 +18,7 @@ abstract class InputInjector {
 
   /// 释放键盘按键。keyCode 为虚拟键码（VK_*）。
   void keyUp(int keyCode);
+
+  /// 释放平台原生资源（X display 等）。
+  void dispose();
 }

@@ -4,8 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../capture/capture_isolate.dart';
-import '../platform/windows_capturer.dart';
-import '../platform/windows_injector.dart';
+import '../platform/platform_factory.dart';
 import '../protocol/cmd_codec.dart';
 import '../protocol/cmd_type.dart';
 
@@ -42,7 +41,7 @@ class _ConnectPageState extends State<ConnectPage> {
   bool _waitingDeviceResp = false; // 正在等待"连接设备"的 resCapture 响应
   Timer? _captureTimer; // 抓屏定时器（30ms 一帧）
   final _captureIsolate = CaptureIsolate(); // 长驻抓屏 isolate（UI 不卡）
-  final _injector = WindowsInjector(); // 输入注入器（SendInput）
+  final _injector = PlatformFactory.createInjector(); // 平台输入注入器
   int _captureId = 0; // 帧序号
   @override
   void dispose() {
@@ -55,6 +54,7 @@ class _ConnectPageState extends State<ConnectPage> {
     _reconnectTimer?.cancel();
     _captureTimer?.cancel();
     _captureIsolate.dispose(); // 关后台抓屏 isolate
+    _injector.dispose(); // 释放平台原生资源（X display 等）
     super.dispose();
   }
 
@@ -83,13 +83,13 @@ class _ConnectPageState extends State<ConnectPage> {
       final reqBody = CmdCodec.buildReqCliInfoBody(1, 'Windows');
       socket.add(CmdCodec.encode(CmdType.reqCliInfo, reqBody));
 
-      // 3. 启动心跳定时器，每 5 秒发一次 reqPing
+      // 3. 启动心跳定时器，每 3 秒发一次 reqPing（与 server 心跳周期保持一致）
       _heartbeatTimer?.cancel();
-      _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 3), (_) {
         final lasttime = _lastrepongtime;
         if (lasttime != null &&
-            DateTime.now().difference(lasttime) > const Duration(seconds: 15)) {
-          _handleDisconnect(); // 超 15 秒无数据 → 判死重连
+            DateTime.now().difference(lasttime) > const Duration(seconds: 30)) {
+          _handleDisconnect(); // 超 30 秒无数据 → 判死重连
           return;
         }
         try {
@@ -127,6 +127,8 @@ class _ConnectPageState extends State<ConnectPage> {
   void _handleDisconnect(){
     if (!mounted) return;
     _heartbeatTimer?.cancel();
+    _socket?.destroy(); // 释放旧 socket，避免旧 listener 再次触发 onDone 造成双重重连
+    _socket = null;
     setState(() {
       _connectingServer = false;
       _serverStatus = '与服务器断开连接，5秒后尝试重连…';
@@ -281,10 +283,10 @@ class _ConnectPageState extends State<ConnectPage> {
   /// 启动抓屏循环：每 30ms 请求后台 isolate 抓一帧 → 发送。
   void _startCaptureLoop() {
     // 启动长驻抓屏 isolate（先取屏幕尺寸）
-    final probe = WindowsCapturer();
+    final probe = PlatformFactory.createCapturer();
     final w = probe.width;
     final h = probe.height;
-    probe.dispose(); // 临时探测用，用完释放 GDI 对象
+    probe.dispose(); // 临时探测用，用完释放原生对象
     _captureIsolate.start(w, h);
     _captureTimer?.cancel();
     _captureTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {

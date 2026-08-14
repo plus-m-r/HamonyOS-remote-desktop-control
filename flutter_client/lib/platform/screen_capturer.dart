@@ -9,4 +9,7 @@ abstract class ScreenCapturer {
   /// 抓一帧屏幕，返回 BGRA 像素（4 字节/像素）。
   /// 对应 Java 的 captureScreen(Gray8Bits) 彩色分支。
   Future<Uint8List> capture();
+
+  /// 释放平台原生资源（display/DC/位图等）。
+  void dispose();
 }

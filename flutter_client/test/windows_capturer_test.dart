@@ -35,6 +35,10 @@ void main() {
   });
 
   test('ScreenCapturer 接口可被 WindowsCapturer 实例化（多态）', () {
+    if (!Platform.isWindows) {
+      markTestSkipped('WindowsCapturer 仅 Windows 可实例化，非 Windows 跳过');
+      return;
+    }
     // 验证接口设计：业务层只依赖抽象，能接到具体实现
     final ScreenCapturer capturer = WindowsCapturer();
     expect(capturer.width, greaterThan(0));

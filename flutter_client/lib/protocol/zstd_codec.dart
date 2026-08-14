@@ -49,10 +49,24 @@ class ZstdCodec {
   static DynamicLibrary _loadLib() {
     // 多路径尝试：① exe 同目录（运行时工作目录是 exe 目录，DLL 拷到那里最稳）
     //             ② 工程相对路径（flutter test 工作目录 = 工程根）
+    // Linux 下 libzstd.so 由系统包提供（apt install libzstd-dev）
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final candidates = [
-      '$exeDir\\libzstd.dll',
-      'third_party/zstd-win64/zstd-v1.5.7-win64/dll/libzstd.dll',
+    final candidates = <String>[
+      if (Platform.isWindows) ...[
+        '$exeDir\\libzstd.dll',
+        'third_party/zstd-win64/zstd-v1.5.7-win64/dll/libzstd.dll',
+      ] else if (Platform.isLinux) ...[
+        '$exeDir/libzstd.so',
+        'libzstd.so.1',
+        'libzstd.so',
+        '/usr/lib/x86_64-linux-gnu/libzstd.so.1',
+        '/usr/lib/aarch64-linux-gnu/libzstd.so.1',
+        '/usr/local/lib/libzstd.so.1',
+      ] else if (Platform.isMacOS) ...[
+        '$exeDir/libzstd.dylib',
+        'libzstd.dylib',
+        '/usr/local/lib/libzstd.dylib',
+      ],
     ];
     Object? lastError;
     for (final path in candidates) {
@@ -62,7 +76,7 @@ class ZstdCodec {
         lastError = e;
       }
     }
-    throw StateError('找不到 libzstd.dll：$candidates，最后错误: $lastError');
+    throw StateError('找不到 libzstd 库：$candidates，最后错误: $lastError');
   }
 
   static Pointer<Void> _getCctx() {
